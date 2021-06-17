@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -18,151 +16,20 @@
 
 namespace hellogoodbye {
 
+std::string enumEnumUInt32ToString(EnumUInt32 val) {
+  switch (val) {
+    case EnumUInt32::HIGH:
+      return "HIGH";
+    case EnumUInt32::URGENT:
+      return "URGENT";
+    case EnumUInt32::YESTERDAY:
+      return "YESTERDAY";
+  }
+  return "<INVALID_OPTION>";
+}
+
 constexpr const char* const HelloRequest::name;
 
-void HelloRequest::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, key());
-  writer.writeField(2 /* field id */, shardId());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
-
-void HelloRequest::deserialize(carbon::CarbonProtocolReader& reader) {
-  reader.readStructBegin();
-  while (true) {
-    const auto pr = reader.readFieldHeader();
-    const auto fieldType = pr.first;
-    const auto fieldId = pr.second;
-
-    if (fieldType == carbon::FieldType::Stop) {
-      break;
-    }
-
-    switch (fieldId) {
-      case 1: {
-        reader.readField(key(), fieldType);
-        break;
-      }
-      case 2: {
-        reader.readField(shardId(), fieldType);
-        break;
-      }
-      default: {
-        reader.skip(fieldType);
-        break;
-      }
-    }
-  }
-  reader.readStructEnd();
-}
-
-void HelloReply::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, result());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
-
-void HelloReply::deserialize(carbon::CarbonProtocolReader& reader) {
-  reader.readStructBegin();
-  while (true) {
-    const auto pr = reader.readFieldHeader();
-    const auto fieldType = pr.first;
-    const auto fieldId = pr.second;
-
-    if (fieldType == carbon::FieldType::Stop) {
-      break;
-    }
-
-    switch (fieldId) {
-      case 1: {
-        reader.readField(result(), fieldType);
-        break;
-      }
-      default: {
-        reader.skip(fieldType);
-        break;
-      }
-    }
-  }
-  reader.readStructEnd();
-}
-
 constexpr const char* const GoodbyeRequest::name;
-
-void GoodbyeRequest::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, key());
-  writer.writeField(2 /* field id */, shardId());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
-
-void GoodbyeRequest::deserialize(carbon::CarbonProtocolReader& reader) {
-  reader.readStructBegin();
-  while (true) {
-    const auto pr = reader.readFieldHeader();
-    const auto fieldType = pr.first;
-    const auto fieldId = pr.second;
-
-    if (fieldType == carbon::FieldType::Stop) {
-      break;
-    }
-
-    switch (fieldId) {
-      case 1: {
-        reader.readField(key(), fieldType);
-        break;
-      }
-      case 2: {
-        reader.readField(shardId(), fieldType);
-        break;
-      }
-      default: {
-        reader.skip(fieldType);
-        break;
-      }
-    }
-  }
-  reader.readStructEnd();
-}
-
-void GoodbyeReply::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, result());
-  writer.writeField(2 /* field id */, message());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
-
-void GoodbyeReply::deserialize(carbon::CarbonProtocolReader& reader) {
-  reader.readStructBegin();
-  while (true) {
-    const auto pr = reader.readFieldHeader();
-    const auto fieldType = pr.first;
-    const auto fieldId = pr.second;
-
-    if (fieldType == carbon::FieldType::Stop) {
-      break;
-    }
-
-    switch (fieldId) {
-      case 1: {
-        reader.readField(result(), fieldType);
-        break;
-      }
-      case 2: {
-        reader.readField(message(), fieldType);
-        break;
-      }
-      default: {
-        reader.skip(fieldType);
-        break;
-      }
-    }
-  }
-  reader.readStructEnd();
-}
 
 } // namespace hellogoodbye

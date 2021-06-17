@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <functional>
@@ -36,6 +34,10 @@ class Category {
    * Configuration is broken.
    */
   static const char* const kInvalidConfig;
+  /**
+   * Dynamic configuration is broken.
+   */
+  static const char* const kInvalidDynamicSampler;
   /**
    * Out of memory, not enough disk space, etc.
    */
@@ -79,7 +81,7 @@ std::pair<std::string, HandlerFunc> logToStdError();
 
 std::pair<std::string, HandlerFunc> throwLogicError();
 
-} // handlers
+} // namespace handlers
 
 namespace detail {
 
@@ -112,7 +114,7 @@ void log(
       folly::format(msgFormat, std::forward<Args>(args)...).str());
 }
 
-} // detail
+} // namespace detail
 
 /**
  * Add new failure handler. Names should be unique.
@@ -155,6 +157,6 @@ void setServiceContext(folly::StringPiece service, std::string context);
 
 #define LOG_FAILURE(...) \
   facebook::memcache::failure::detail::log(__FILE__, __LINE__, __VA_ARGS__)
-}
-}
-} // facebook::memcache::failure
+} // namespace failure
+} // namespace memcache
+} // namespace facebook

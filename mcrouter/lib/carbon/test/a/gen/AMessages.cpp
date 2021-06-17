@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -20,13 +18,6 @@ namespace carbon {
 namespace test {
 
 constexpr const char* const AnotherRequest::name;
-
-void AnotherRequest::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, key());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
 
 void AnotherRequest::deserialize(carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
@@ -53,13 +44,6 @@ void AnotherRequest::deserialize(carbon::CarbonProtocolReader& reader) {
   reader.readStructEnd();
 }
 
-void AnotherReply::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, result());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
-
 void AnotherReply::deserialize(carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
   while (true) {
@@ -84,6 +68,5 @@ void AnotherReply::deserialize(carbon::CarbonProtocolReader& reader) {
   }
   reader.readStructEnd();
 }
-
 } // namespace test
 } // namespace carbon

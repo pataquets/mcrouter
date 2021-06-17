@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 namespace facebook {
@@ -17,7 +15,7 @@ namespace detail {
 // Timeout to evict unused matching messages' key.
 const std::chrono::milliseconds kMatchingKeyTimeout{5000};
 
-} // detail namespace
+} // namespace detail
 
 template <class Callback, class RequestList>
 SnifferParser<Callback, RequestList>::SnifferParser(Callback& cb) noexcept
@@ -46,7 +44,10 @@ void SnifferParserBase<Callback>::requestReady(
     auto msgIt = msgs_.emplace(
         msgId,
         Item(
-            msgId, request.key().fullKey().str(), currentMsgStartTimeUs_, now));
+            msgId,
+            request.key_ref()->fullKey().str(),
+            currentMsgStartTimeUs_,
+            now));
     evictionQueue_.push_back(msgIt.first->second);
   }
   callback_.requestReady(
@@ -58,7 +59,7 @@ template <class Reply>
 void SnifferParserBase<Callback>::replyReady(
     uint64_t msgId,
     Reply&& reply,
-    ReplyStatsContext replyStatsContext) {
+    RpcStatsContext rpcStatsContext) {
   std::string key;
   int64_t latency = 0;
   if (msgId != 0) {
@@ -77,7 +78,7 @@ void SnifferParserBase<Callback>::replyReady(
       toAddress_,
       getParserProtocol(),
       latency,
-      replyStatsContext);
+      rpcStatsContext);
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

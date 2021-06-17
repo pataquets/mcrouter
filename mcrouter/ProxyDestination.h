@@ -1,35 +1,31 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <array>
 #include <memory>
 #include <string>
 
-#include <folly/IntrusiveList.h>
+#include <folly/Range.h>
 #include <folly/SpinLock.h>
-#include <folly/io/async/AsyncTimeout.h>
 
-#include "mcrouter/ExponentialSmoothData.h"
+#include "mcrouter/ProxyDestinationBase.h"
 #include "mcrouter/TkoLog.h"
 #include "mcrouter/config.h"
-#include "mcrouter/lib/McOperation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/mc/msg.h"
-#include "mcrouter/lib/network/AccessPoint.h"
-#include "mcrouter/lib/network/AsyncMcClient.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/Transport.h"
 
 namespace facebook {
 namespace memcache {
 
-struct ReplyStatsContext;
+struct AccessPoint;
+struct RpcStatsContext;
 
 namespace mcrouter {
 
@@ -44,66 +40,34 @@ struct DestinationRequestCtx {
   explicit DestinationRequestCtx(int64_t now) : startTime(now) {}
 };
 
-class ProxyDestination {
+template <class Transport>
+class ProxyDestination : public ProxyDestinationBase {
  public:
-  enum class State {
-    kNew, // never connected
-    kUp, // currently connected
-    kDown, // currently down
-    kClosed, // closed due to inactive
-    kNumStates
-  };
-
-  struct Stats {
-    State state{State::kNew};
-    ExponentialSmoothData<16> avgLatency;
-    std::unique_ptr<std::array<uint64_t, mc_nres>> results;
-    size_t probesSent{0};
-    double retransPerKByte{0.0};
-  };
-
-  ProxyBase* proxy{nullptr}; ///< for convenience
-
-  std::shared_ptr<TkoTracker> tracker;
+  using ConnectionStatusCallbacks =
+      typename Transport::ConnectionStatusCallbacks;
+  using RequestStatusCallbacks = typename Transport::RequestStatusCallbacks;
+  using AuthorizationCallbacks = typename Transport::AuthorizationCallbacks;
+  using RequestQueueStats = typename Transport::RequestQueueStats;
 
   ~ProxyDestination();
 
-  // This is a blocking call that will return reply, once it's ready.
+  /**
+   * Sends a request to this destination.
+   * NOTE: This is a blocking call that will return reply, once it's ready.
+   *
+   * @param request             The request to send.
+   * @param requestContext      Context about this request.
+   * @param timeout             The timeout of this call.
+   * @param rpcStatsContext     Output argument with stats about the RPC
+   */
   template <class Request>
   ReplyT<Request> send(
       const Request& request,
       DestinationRequestCtx& requestContext,
       std::chrono::milliseconds timeout,
-      ReplyStatsContext& replyStatsContext);
+      RpcStatsContext& rpcStatsContext);
 
-  // returns true if okay to send req using this client
-  bool may_send() const;
-
-  // Returns true if the current request should be dropped
-  template <class Request>
-  bool shouldDrop() const;
-
-  /**
-   * @return stats for ProxyDestination
-   */
-  const Stats& stats() const {
-    return stats_;
-  }
-
-  const std::shared_ptr<const AccessPoint>& accessPoint() const {
-    return accessPoint_;
-  }
-
-  void resetInactive();
-
-  size_t getPendingRequestCount() const;
-  size_t getInflightRequestCount() const;
-
-  void updateShortestTimeout(std::chrono::milliseconds timeout);
-
-  void updatePoolName(std::string poolName) {
-    poolName_ = std::move(poolName);
-  }
+  void resetInactive() override;
 
   /**
    * Gracefully closes the connection, allowing it to properly drain if
@@ -111,80 +75,75 @@ class ProxyDestination {
    */
   void closeGracefully();
 
+  RequestQueueStats getRequestStats() const override;
+
+ protected:
+  void updateTransportTimeoutsIfShorter(
+      std::chrono::milliseconds shortestConnectTimeout,
+      std::chrono::milliseconds shortestWriteTimeout) override final;
+  carbon::Result sendProbe() override final;
+  std::weak_ptr<ProxyDestinationBase> selfPtr() override final {
+    return selfPtr_;
+  }
+
+  std::shared_ptr<const AccessPoint> replaceAP(
+      std::shared_ptr<const AccessPoint> newAccessPoint) {
+    auto ret = ProxyDestinationBase::replaceAP(newAccessPoint);
+    closeGracefully();
+    return ret;
+  }
+
  private:
-  std::unique_ptr<AsyncMcClient> client_;
-  std::shared_ptr<const AccessPoint> accessPoint_;
-  // Ensure proxy thread doesn't reset AsyncMcClient
+  std::unique_ptr<Transport, typename Transport::Destructor> transport_;
+  // Ensure proxy thread doesn't reset the Transport
   // while config and stats threads may be accessing it
-  mutable folly::SpinLock clientLock_;
+  mutable folly::SpinLock transportLock_;
 
-  // Shortest timeout among all DestinationRoutes using this destination
-  std::chrono::milliseconds shortestTimeout_{0};
-  const uint64_t qosClass_{0};
-  const uint64_t qosPath_{0};
-  folly::StringPiece routerInfoName_;
-
-  Stats stats_;
-
+  // Retransmits control information
   uint64_t lastRetransCycles_{0}; // Cycles when restransmits were last fetched
   uint64_t rxmitsToCloseConnection_{0};
   uint64_t lastConnCloseCycles_{0}; // Cycles when connection was last closed
 
-  int probe_delay_next_ms{0};
-  bool probeInflight_{false};
-  std::string poolName_;
-  // The string is stored in ProxyDestinationMap::destinations_
-  folly::StringPiece pdstnKey_; ///< consists of ap, server_timeout
-
-  std::unique_ptr<folly::AsyncTimeout> probeTimer_;
-
+  /**
+   * Creates a new ProxyDestination.
+   *
+   * @throws std::logic_error If Transport is not compatible with
+   *                          AccessPoint::getProtocol().
+   */
   static std::shared_ptr<ProxyDestination> create(
       ProxyBase& proxy,
       std::shared_ptr<AccessPoint> ap,
       std::chrono::milliseconds timeout,
-      uint64_t qosClass,
-      uint64_t qosPath,
-      folly::StringPiece routerInfoName);
+      uint32_t qosClass,
+      uint32_t qosPath);
 
-  void setState(State st);
-
-  void start_sending_probes();
-  void stop_sending_probes();
-
-  void schedule_next_probe();
-
-  void handle_tko(const mc_res_t result, bool is_probe_req);
-
-  // Process tko, stats and duration timer.
-  void onReply(
-      const mc_res_t result,
-      DestinationRequestCtx& destreqCtx,
-      const ReplyStatsContext& replyStatsContext);
-
-  AsyncMcClient& getAsyncMcClient();
-  void initializeAsyncMcClient();
+  Transport& getTransport();
+  void initializeTransport();
 
   ProxyDestination(
       ProxyBase& proxy,
       std::shared_ptr<AccessPoint> ap,
       std::chrono::milliseconds timeout,
-      uint64_t qosClass,
-      uint64_t qosPath,
-      folly::StringPiece routerInfoName);
+      uint32_t qosClass,
+      uint32_t qosPath);
 
-  void onTkoEvent(TkoLogEvent event, mc_res_t result) const;
+  // Process tko, stats and duration timer.
+  void onReply(
+      const carbon::Result result,
+      DestinationRequestCtx& destreqCtx,
+      const RpcStatsContext& rpcStatsContext,
+      bool isRequestBufferDirty);
 
-  void handleRxmittingConnection();
-
-  void* stateList_{nullptr};
-  folly::IntrusiveListHook stateListHook_;
+  void handleRxmittingConnection(const carbon::Result result, uint64_t latency);
+  bool latencyAboveThreshold(uint64_t latency);
 
   std::weak_ptr<ProxyDestination> selfPtr_;
 
   friend class ProxyDestinationMap;
 };
-} // mcrouter
-} // memcache
-} // facebook
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ProxyDestination-inl.h"

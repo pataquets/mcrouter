@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "McrouterLogger.h"
 
 #include <sys/stat.h>
@@ -84,7 +82,7 @@ void write_stats_file(
 
 void write_stats_to_disk(
     const McrouterOptions& opts,
-    const std::vector<stat_t>& stats,
+    std::vector<stat_t>& stats,
     const folly::dynamic& requestStats) {
   try {
     std::string prefix = getStatPrefix(opts) + ".";
@@ -95,18 +93,21 @@ void write_stats_to_disk(
         auto key = prefix + stats[i].name.str();
 
         switch (stats[i].type) {
-          case stat_uint64:
-            jstats[key] = stats[i].data.uint64;
+          case stat_uint64: {
+            jstats[key] = folly::make_atomic_ref(stats[i].data.uint64)
+                              .load(std::memory_order_relaxed);
             break;
-
-          case stat_int64:
-            jstats[key] = stats[i].data.int64;
+          }
+          case stat_int64: {
+            jstats[key] = folly::make_atomic_ref(stats[i].data.int64)
+                              .load(std::memory_order_relaxed);
             break;
-
-          case stat_double:
-            jstats[key] = stats[i].data.dbl;
+          }
+          case stat_double: {
+            jstats[key] = folly::make_atomic_ref(stats[i].data.dbl)
+                              .load(std::memory_order_relaxed);
             break;
-
+          }
           default:
             continue;
         }
@@ -210,6 +211,7 @@ void McrouterLogger::log() {
 
   std::vector<stat_t> stats(num_stats);
   prepare_stats(router_, stats.data());
+  append_pool_stats(router_, stats);
 
   folly::dynamic requestStats(folly::dynamic::object());
   for (size_t i = 0; i < router_.opts().num_proxies; ++i) {
@@ -219,17 +221,30 @@ void McrouterLogger::log() {
       requestStats.setDefault(k, 0) += proxyRequestStats[k];
     }
   }
+  /* Add standalone stats (does not filter zeroes) */
+  {
+    const auto externalRequestStats =
+        router_.externalStatsHandler().dumpStats(false /* filterZeroes */);
+    requestStats.update_missing(externalRequestStats);
+  }
 
   for (int i = 0; i < num_stats; ++i) {
     if (stats[i].group & rate_stats) {
       stats[i].type = stat_double;
-      stats[i].data.dbl = stats_aggregate_rate_value(router_, i);
+      folly::make_atomic_ref(stats[i].data.dbl)
+          .store(
+              stats_aggregate_rate_value(router_, i),
+              std::memory_order_relaxed);
     } else if (stats[i].group & max_stats) {
       stats[i].type = stat_uint64;
-      stats[i].data.uint64 = stats_aggregate_max_value(router_, i);
+      folly::make_atomic_ref(stats[i].data.uint64)
+          .store(
+              stats_aggregate_max_value(router_, i), std::memory_order_relaxed);
     } else if (stats[i].group & max_max_stats) {
       stats[i].type = stat_uint64;
-      stats[i].data.uint64 = stats_aggregate_max_max_value(router_, i);
+      folly::make_atomic_ref(stats[i].data.uint64)
+          .store(
+              stats_aggregate_max_value(router_, i), std::memory_order_relaxed);
     }
   }
 
@@ -245,6 +260,6 @@ void McrouterLogger::log() {
   }
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

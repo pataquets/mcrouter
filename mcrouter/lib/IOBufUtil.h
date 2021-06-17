@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -14,13 +12,14 @@
 
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
+#include <thrift/lib/cpp2/FieldRef.h>
 
 namespace folly {
 class IOBuf;
 template <class T>
 class Range;
 using StringPiece = Range<const char*>;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -31,10 +30,12 @@ folly::StringPiece getRange(const folly::IOBuf& buf);
 folly::StringPiece coalesceAndGetRange(std::unique_ptr<folly::IOBuf>& buf);
 folly::StringPiece coalesceAndGetRange(folly::IOBuf& buf);
 folly::StringPiece coalesceAndGetRange(folly::Optional<folly::IOBuf>& buf);
-
-bool hasSameMemoryRegion(const folly::IOBuf& buf, folly::StringPiece range);
-
-bool hasSameMemoryRegion(const folly::IOBuf& a, const folly::IOBuf& b);
+folly::StringPiece coalesceAndGetRange(
+    apache::thrift::optional_field_ref<folly::IOBuf&> buf);
+folly::StringPiece coalesceAndGetRange(
+    apache::thrift::field_ref<folly::IOBuf&> buf);
+folly::StringPiece coalesceAndGetRange(
+    apache::thrift::field_ref<const folly::IOBuf&> buf);
 
 void copyInto(char* raw, const folly::IOBuf& buf);
 
@@ -110,5 +111,5 @@ copyAsString(const folly::IOBuf& source, const uint8_t* begin, size_t size) {
  */
 folly::IOBuf
 coalesceIovecs(const struct iovec* iov, size_t iovcnt, size_t destCapacity);
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

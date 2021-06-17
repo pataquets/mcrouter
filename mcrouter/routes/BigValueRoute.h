@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <vector>
@@ -15,8 +13,7 @@
 #include <folly/Traits.h>
 
 #include "mcrouter/ProxyRequestContext.h"
-#include "mcrouter/lib/McOperation.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/network/gen/MemcacheRouteHandleIf.h"
@@ -24,7 +21,7 @@
 
 namespace folly {
 class IOBuf;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -60,7 +57,7 @@ class BigValueRoute {
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<MemcacheRouteHandleIf>& t) const;
 
@@ -70,7 +67,12 @@ class BigValueRoute {
 
   template <class Request>
   typename std::enable_if<
-      folly::IsOneOf<Request, McGetRequest, McGetsRequest>::value,
+      folly::IsOneOf<
+          Request,
+          McGetRequest,
+          McGetsRequest,
+          McGatRequest,
+          McGatsRequest>::value,
       ReplyT<Request>>::type
   route(const Request& req) const;
 
@@ -117,7 +119,9 @@ class BigValueRoute {
       typename std::iterator_traits<FuncIt>::value_type()>::type>
   collectAllByBatches(FuncIt beginF, FuncIt endF) const;
 
-  std::pair<std::vector<McSetRequest>, ChunksInfo> chunkUpdateRequests(
+  template <class Request>
+  std::pair<std::vector<Request>, BigValueRoute::ChunksInfo>
+  chunkUpdateRequests(
       folly::StringPiece baseKey,
       const folly::IOBuf& value,
       int32_t exptime) const;
@@ -137,8 +141,8 @@ class BigValueRoute {
   createChunkKey(folly::StringPiece key, uint32_t index, uint64_t suffix) const;
 };
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "BigValueRoute-inl.h"

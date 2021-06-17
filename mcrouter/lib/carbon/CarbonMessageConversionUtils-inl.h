@@ -1,19 +1,19 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <string>
 
 #include <folly/json.h>
+#include <thrift/lib/cpp2/FieldRef.h>
 
 #include "mcrouter/lib/carbon/CommonSerializationTraits.h"
 #include "mcrouter/lib/carbon/Fields.h"
 #include "mcrouter/lib/carbon/Keys.h"
+#include "mcrouter/lib/carbon/Result.h"
 
 namespace carbon {
 
@@ -31,7 +31,10 @@ class ToDynamicVisitor {
   template <class T>
   bool enterMixin(uint16_t /* id */, folly::StringPiece name, const T& value) {
     if (!opts_.inlineMixins) {
-      value_.insert(getMixinName(name), convertToFollyDynamic(value));
+      auto mixin = convertToFollyDynamic(value, opts_);
+      if (mixin != nullptr && shouldSerialize(mixin)) {
+        value_.insert(getMixinName(name), std::move(mixin));
+      }
       return false;
     } else {
       return true;
@@ -45,7 +48,7 @@ class ToDynamicVisitor {
   template <class T>
   bool visitField(uint16_t /* id */, folly::StringPiece name, const T& value) {
     auto val = toDynamic(value);
-    if (val != nullptr) {
+    if (val != nullptr && shouldSerialize(val)) {
       value_.insert(name, std::move(val));
     }
     return true;
@@ -61,6 +64,28 @@ class ToDynamicVisitor {
  private:
   folly::dynamic value_;
   FollyDynamicConversionOptions opts_;
+
+  bool shouldSerialize(const folly::dynamic& val) {
+    if (opts_.serializeFieldsWithDefaultValue) {
+      return true;
+    }
+
+    if (val.isBool() && !val.getBool()) {
+      return false;
+    } else if (val.isInt() && val.getInt() == 0) {
+      return false;
+    } else if (val.isDouble() && val.getDouble() == 0.0) {
+      return false;
+    } else if (
+        (val.isString() || val.isArray() || val.isObject()) && val.empty()) {
+      return false;
+    }
+    return true;
+  }
+
+  folly::dynamic toDynamic(carbon::Result res) const {
+    return folly::dynamic(carbon::resultToString(res));
+  }
 
   folly::dynamic toDynamic(char c) const {
     return folly::dynamic(std::string(1, c));
@@ -78,6 +103,15 @@ class ToDynamicVisitor {
   template <class T>
   folly::dynamic toDynamic(const folly::Optional<T>& value) const {
     if (value.hasValue()) {
+      return toDynamic(*value);
+    }
+    return nullptr;
+  }
+
+  template <class T>
+  folly::dynamic toDynamic(
+      const apache::thrift::optional_field_ref<T&> value) const& {
+    if (value.has_value()) {
       return toDynamic(*value);
     }
     return nullptr;
@@ -197,16 +231,32 @@ class ToDynamicVisitor {
   }
 
   template <class T>
+  typename std::enable_if<
+      std::is_convertible<T, folly::dynamic>::value,
+      folly::dynamic>::type
+  toDynamic8(const T& value) const {
+    return value;
+  }
+
+  template <class T>
+  typename std::enable_if<
+      !std::is_convertible<T, folly::dynamic>::value,
+      folly::dynamic>::type
+  toDynamic8(const T& value) const {
+    return toDynamic9(value);
+  }
+
+  template <class T>
   typename std::enable_if<IsUserReadWriteDefined<T>::value, folly::dynamic>::
       type
-      toDynamic8(const T& /* value */) const {
+      toDynamic9(const T& /* value */) const {
     return "(user type)";
   }
 
   template <class T>
   typename std::enable_if<!IsUserReadWriteDefined<T>::value, folly::dynamic>::
       type
-      toDynamic8(const T& /* value */) const {
+      toDynamic9(const T& /* value */) const {
     if (!opts_.ignoreUnserializableTypes) {
       return "(not serializable)";
     }
@@ -229,7 +279,7 @@ class FromDynamicVisitor {
       std::function<void(folly::StringPiece, folly::StringPiece)> onChildError;
       if (onError_) {
         onChildError = [this, &name](
-            folly::StringPiece field, folly::StringPiece msg) {
+                           folly::StringPiece field, folly::StringPiece msg) {
           onError(folly::to<std::string>(name, ".", field), msg);
         };
       }
@@ -251,11 +301,21 @@ class FromDynamicVisitor {
     return true;
   }
 
-  template <size_t id, class T, class U>
-  bool visitUnionMember(folly::StringPiece fieldName, U& u) {
+  template <class T>
+  bool visitField(
+      uint16_t /* id */,
+      folly::StringPiece name,
+      apache::thrift::optional_field_ref<T&> value) {
+    if (auto jsonPtr = json_.get_ptr(name)) {
+      fromDynamic(name, *jsonPtr, value);
+    }
+    return true;
+  }
+
+  template <class T, class F>
+  bool visitUnionMember(folly::StringPiece fieldName, F&& emplaceFn) {
     if (auto jsonPtr = json_.get_ptr(fieldName)) {
-      auto& ref = u.template emplace<id>();
-      fromDynamic(fieldName, *jsonPtr, ref);
+      fromDynamic(fieldName, *jsonPtr, emplaceFn());
     }
     return true;
   }
@@ -329,6 +389,19 @@ class FromDynamicVisitor {
   bool fromDynamic(
       folly::StringPiece name,
       const folly::dynamic& json,
+      apache::thrift::optional_field_ref<T&> valRef) & {
+    T val;
+    if (fromDynamic(name, json, val)) {
+      valRef = std::move(val);
+      return true;
+    }
+    return false;
+  }
+
+  template <class T>
+  bool fromDynamic(
+      folly::StringPiece name,
+      const folly::dynamic& json,
       Keys<T>& valRef) {
     if (!json.isString()) {
       onError(name, "Invalid type. String expected.");
@@ -393,7 +466,7 @@ class FromDynamicVisitor {
   fromDynamic4(folly::StringPiece name, const folly::dynamic& json, T& valRef) {
     size_t numChildErrors = 0;
     auto onChildError = [this, &name, &numChildErrors](
-        folly::StringPiece field, folly::StringPiece msg) {
+                            folly::StringPiece field, folly::StringPiece msg) {
       numChildErrors++;
       onError(folly::to<std::string>(name, ".", field), msg);
     };
@@ -414,7 +487,7 @@ class FromDynamicVisitor {
   fromDynamic5(folly::StringPiece name, const folly::dynamic& json, T& valRef) {
     size_t numChildErrors = 0;
     auto onChildError = [this, &name, &numChildErrors](
-        folly::StringPiece field, folly::StringPiece msg) {
+                            folly::StringPiece field, folly::StringPiece msg) {
       numChildErrors++;
       onError(folly::to<std::string>(name, ".", field), msg);
     };
@@ -522,7 +595,7 @@ class FromDynamicVisitor {
   }
 };
 
-} // detail
+} // namespace detail
 
 template <class Message>
 folly::dynamic convertToFollyDynamic(
@@ -543,4 +616,4 @@ void convertFromFollyDynamic(
   m.visitFields(visitor);
 }
 
-} // carbon
+} // namespace carbon

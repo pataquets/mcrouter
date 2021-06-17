@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -96,11 +94,11 @@ class UniqueIntrusiveList {
 
   /**
    * Remove the element pointed to by `it` from the list,
-   * and return the unique_ptr to it.
+   * moves the iterator to the next element and returns the unique_ptr to it.
    */
-  std::unique_ptr<T, TDeleter> extract(iterator it) {
+  std::unique_ptr<T, TDeleter> extractAndAdvanceIterator(iterator& it) {
     std::unique_ptr<T, TDeleter> t(&(*it), TDeleter());
-    list_.erase(it);
+    it = list_.erase(it);
     return t;
   }
 
@@ -141,5 +139,5 @@ class UniqueIntrusiveList {
  private:
   folly::CountedIntrusiveList<T, PtrToMember> list_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

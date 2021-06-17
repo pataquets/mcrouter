@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <sys/types.h>
@@ -18,10 +16,9 @@
 #include <thread>
 
 #include <folly/Range.h>
+#include <folly/SharedMutex.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/io/async/EventBase.h>
-
-#include "mcrouter/lib/fbi/cpp/sfrlock.h"
 
 namespace facebook {
 namespace memcache {
@@ -70,11 +67,6 @@ class AsyncWriter {
   bool run(std::function<void()> f);
 
   /**
-   * Wait until all tasks scheduled prior to this call have been completed.
-   */
-  void completePendingTasks();
-
-  /**
    * Increase the maximum queue size. The max queue size will never decrease.
    **/
   void increaseMaxQueueSize(size_t add);
@@ -93,7 +85,7 @@ class AsyncWriter {
   size_t maxQueueSize_;
   std::atomic<size_t> queueSize_{0};
   std::atomic<bool> stopped_{false};
-  SFRLock runLock_;
+  folly::SharedMutex runLock_;
 
   folly::fibers::FiberManager fiberManager_;
   folly::EventBase eventBase_;
@@ -105,6 +97,6 @@ class AsyncWriter {
  */
 bool awriter_queue(AsyncWriter* w, awriter_entry_t* e);
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

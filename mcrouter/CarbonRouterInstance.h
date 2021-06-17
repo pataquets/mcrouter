@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <atomic>
@@ -18,6 +16,7 @@
 #include <vector>
 
 #include <folly/Range.h>
+#include <folly/executors/IOThreadPoolExecutor.h>
 
 #include "mcrouter/CallbackPool.h"
 #include "mcrouter/CarbonRouterClient.h"
@@ -30,8 +29,9 @@
 namespace facebook {
 namespace memcache {
 namespace mcrouter {
-
+namespace detail {
 class McrouterManager;
+}
 
 class ProxyThread;
 
@@ -48,30 +48,51 @@ class CarbonRouterInstance
      so the users don't need to worry about destruction. */
 
   /**
-   * @return  If an instance with the given persistence_id already exists,
+   * @return  If an instance with the given persistenceId already exists,
    *   returns a pointer to it. Options are ignored in this case.
-   *   Otherwise spins up a new instance and returns the pointer to it. May
+   *   Otherwise, internally create an IOThreadPoolExecutor in no-resize mode,
+   *   spin up a new instance and returns the pointer to it. May
    *   return nullptr if the McRouterManager singleton is unavailable, perhaps
    *   due to misconfiguration.
-   * @param evbs  Must be either empty or contain options.num_proxies
-   *   event bases.  If empty, mcrouter will spawn its own proxy threads.
-   *   Otherwise, proxies will run on the provided event bases
-   *   (auxiliary threads will still be spawned).
+   * @param persistenceId String uniquely identifying this instance
+   * @param options McrouterOptions to use when creating instance
    * @throw runtime_error  If no valid instance can be constructed from
    *   the provided options.
    */
   static CarbonRouterInstance<RouterInfo>* init(
-      folly::StringPiece persistence_id,
-      const McrouterOptions& options,
-      const std::vector<folly::EventBase*>& evbs =
-          std::vector<folly::EventBase*>());
+      folly::StringPiece persistenceId,
+      const McrouterOptions& options);
 
   /**
-   * If an instance with the given persistence_id already exists,
+   * @return  If an instance with the given persistenceId already exists,
+   *   returns a pointer to it. Options are ignored in this case.
+   *   Otherwise spins up a new instance and returns the pointer to it. May
+   *   return nullptr if the McRouterManager singleton is unavailable, perhaps
+   *   due to misconfiguration.
+   * @param persistenceId String uniquely identifying this instance
+   * @param options McrouterOptions to use when creating instance
+   * @param ioThreadPool  IOThreadPoolExecutor for the proxies. This must be
+   *   created in no-resize mode.
+   * @throw runtime_error  If no valid instance can be constructed from
+   *   the provided options.
+   */
+  static CarbonRouterInstance<RouterInfo>* init(
+      folly::StringPiece persistenceId,
+      const McrouterOptions& options,
+      std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool);
+
+  /**
+   * If an instance with the given persistenceId already exists,
    * returns a pointer to it. Otherwise returns nullptr.
    */
   static CarbonRouterInstance<RouterInfo>* get(
-      folly::StringPiece persistence_id);
+      folly::StringPiece persistenceId);
+
+  /**
+   * If an instance with the given persistenceId already exists,
+   * returns true. Otherwise returns false.
+   */
+  static bool hasInstance(folly::StringPiece persistenceId);
 
   /**
    * Intended for short-lived instances with unusual configs
@@ -85,7 +106,7 @@ class CarbonRouterInstance
    */
   static std::shared_ptr<CarbonRouterInstance<RouterInfo>> create(
       McrouterOptions input_options,
-      const std::vector<folly::EventBase*>& evbs = {});
+      std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool = nullptr);
 
   /**
    * Destroys ALL active instances for ALL RouterInfos.
@@ -129,6 +150,17 @@ class CarbonRouterInstance
    */
   Proxy<RouterInfo>* getProxy(size_t index) const;
 
+  const std::vector<Proxy<RouterInfo>*>& getProxies() const;
+
+  folly::StringPiece routerInfoName() const override {
+    return RouterInfo::name;
+  }
+
+  void setIOThreadPool(
+      std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool) {
+    proxyThreads_ = std::move(ioThreadPool);
+  }
+
   CarbonRouterInstance(const CarbonRouterInstance&) = delete;
   CarbonRouterInstance& operator=(const CarbonRouterInstance&) = delete;
   CarbonRouterInstance(CarbonRouterInstance&&) noexcept = delete;
@@ -160,13 +192,13 @@ class CarbonRouterInstance
    */
   std::vector<Proxy<RouterInfo>*> proxies_;
   std::vector<std::unique_ptr<folly::VirtualEventBase>> proxyEvbs_;
+  std::shared_ptr<folly::IOThreadPoolExecutor> proxyThreads_;
 
   /**
-   * This will contain opts.num_proxies elements in Embedded mode (mcrouter
-   * owns proxy threads).
-   * In case of Standalone/sync mode, this vector is empty.
+   * Indicates if evbs/IOThreadPoolExecutor has been created by McRouter or
+   * passed as an argument in construction.
    */
-  std::vector<std::unique_ptr<ProxyThread>> proxyThreads_;
+  bool embeddedMode_{false};
 
   /**
    * The only reason this is a separate function is due to legacy accessor
@@ -174,13 +206,15 @@ class CarbonRouterInstance
    */
   static CarbonRouterInstance<RouterInfo>* createRaw(
       McrouterOptions input_options,
-      const std::vector<folly::EventBase*>& evbs);
+      std::shared_ptr<folly::IOThreadPoolExecutor> ioThreadPool = nullptr);
 
   explicit CarbonRouterInstance(McrouterOptions input_options);
 
   ~CarbonRouterInstance() override;
 
-  folly::Expected<folly::Unit, std::string> spinUp(
+  folly::Expected<folly::Unit, std::string> spinUp();
+
+  folly::Expected<folly::Unit, std::string> setupProxy(
       const std::vector<folly::EventBase*>& evbs);
 
   void spawnAuxiliaryThreads();
@@ -198,6 +232,7 @@ class CarbonRouterInstance
       NB file-based configuration is synchronous
       but server-based configuration is asynchronous */
   bool reconfigure(const ProxyConfigBuilder& builder);
+  bool reconfigurePartially();
   /** Create the ProxyConfigBuilder used to reconfigure.
   Returns error reason if constructor fails. **/
   folly::Expected<ProxyConfigBuilder, std::string> createConfigBuilder();
@@ -209,9 +244,8 @@ class CarbonRouterInstance
   class LegacyPrivateAccessor {
    public:
     static CarbonRouterInstance<RouterInfo>* createRaw(
-        const McrouterOptions& opts,
-        const std::vector<folly::EventBase*>& evbs) {
-      return CarbonRouterInstance<RouterInfo>::createRaw(opts.clone(), evbs);
+        const McrouterOptions& opts) {
+      return CarbonRouterInstance<RouterInfo>::createRaw(opts.clone());
     }
 
     static void destroy(CarbonRouterInstance<RouterInfo>* mcrouter) {
@@ -227,7 +261,7 @@ class CarbonRouterInstance
  private:
   friend class LegacyPrivateAccessor;
   friend class CarbonRouterClient<RouterInfo>;
-  friend class McrouterManager;
+  friend class detail::McrouterManager;
   friend class ProxyDestinationMap;
 };
 
@@ -236,8 +270,8 @@ class CarbonRouterInstance
  */
 void freeAllRouters();
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "CarbonRouterInstance-inl.h"

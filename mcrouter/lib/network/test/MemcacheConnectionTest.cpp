@@ -1,42 +1,80 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <gtest/gtest.h>
 #include <vector>
 
-#include <folly/Baton.h>
 #include <folly/Conv.h>
 #include <folly/fibers/EventBaseLoopController.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/io/IOBuf.h>
 #include <folly/io/async/EventBase.h>
+#include <folly/synchronization/Baton.h>
+#include <thrift/lib/cpp2/server/ThriftServer.h>
 
 #include <mcrouter/lib/network/AsyncMcClient.h>
 #include <mcrouter/options.h>
 #include "mcrouter/lib/network/gen/MemcacheConnection.h"
+#include "mcrouter/lib/network/test/ListenSocket.h"
+#include "mcrouter/lib/network/test/MockMcThriftServerHandler.h"
 #include "mcrouter/lib/network/test/TestClientServerUtil.h"
 
+using facebook::memcache::test::TestServer;
+
+namespace {
+std::pair<
+    std::shared_ptr<apache::thrift::ThriftServer>,
+    std::unique_ptr<std::thread>>
+startMockMcThriftServer(const facebook::memcache::ListenSocket& socket) {
+  auto server = std::make_shared<apache::thrift::ThriftServer>();
+  server->setInterface(
+      std::make_shared<facebook::memcache::test::MockMcThriftServerHandler>());
+  server->setNumIOWorkerThreads(1);
+  server->useExistingSocket(socket.getSocketFd());
+  auto thread = std::make_unique<std::thread>([server]() {
+    LOG(INFO) << "Starting thrift server.";
+    server->serve();
+    LOG(INFO) << "Shutting down thrift server.";
+  });
+  auto conn = std::make_unique<facebook::memcache::MemcacheExternalConnection>(
+      facebook::memcache::ConnectionOptions(
+          "localhost", socket.getPort(), mc_thrift_protocol));
+  bool started = conn->healthCheck();
+  for (int i = 0; !started && i < 5; i++) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    LOG(INFO) << folly::sformat(
+        "health check thrift server on port {}, retry={}", socket.getPort(), i);
+    started = conn->healthCheck();
+  }
+  conn.reset();
+  EXPECT_TRUE(started) << folly::sformat(
+      "fail to start thrift server on port {} after max retries",
+      socket.getPort());
+  return std::make_pair(server, std::move(thread));
+}
+} // namespace
+
 TEST(MemcacheExternalConnectionTest, simpleExternalConnection) {
-  auto server = facebook::memcache::test::TestServer::create(
-      false /* outOfOrder */, false /* useSsl */);
+  TestServer::Config config;
+  config.outOfOrder = false;
+  config.useSsl = false;
+  auto server = TestServer::create(std::move(config));
   auto conn = std::make_unique<facebook::memcache::MemcacheExternalConnection>(
       facebook::memcache::ConnectionOptions(
           "localhost", server->getListenPort(), mc_caret_protocol));
   facebook::memcache::McSetRequest request("hello");
-  request.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "world");
+  request.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "world");
   folly::fibers::Baton baton;
   conn->sendRequestOne(
       request,
       [&baton](
           const facebook::memcache::McSetRequest& /* req */,
           facebook::memcache::McSetReply&& reply) {
-        EXPECT_EQ(mc_res_stored, reply.result());
+        EXPECT_EQ(carbon::Result::STORED, *reply.result_ref());
         baton.post();
       });
   baton.wait();
@@ -47,8 +85,8 @@ TEST(MemcacheExternalConnectionTest, simpleExternalConnection) {
       [&baton](
           const facebook::memcache::McGetRequest& /* req */,
           facebook::memcache::McGetReply&& reply) {
-        EXPECT_EQ(mc_res_found, reply.result());
-        EXPECT_EQ("hello", folly::StringPiece(reply.value()->coalesce()));
+        EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
+        EXPECT_EQ("hello", folly::StringPiece(reply.value_ref()->coalesce()));
         baton.post();
       });
   baton.wait();
@@ -57,9 +95,46 @@ TEST(MemcacheExternalConnectionTest, simpleExternalConnection) {
   server->join();
 }
 
+TEST(MemcacheExternalConnectionTest, simpleExternalConnectionThrift) {
+  facebook::memcache::ListenSocket socket;
+  auto serverInfo = startMockMcThriftServer(socket);
+  auto conn = std::make_unique<facebook::memcache::MemcacheExternalConnection>(
+      facebook::memcache::ConnectionOptions(
+          "localhost", socket.getPort(), mc_thrift_protocol));
+  facebook::memcache::McSetRequest request("hello");
+  request.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "world");
+  folly::fibers::Baton baton;
+  conn->sendRequestOne(
+      request,
+      [&baton](
+          const facebook::memcache::McSetRequest& /* req */,
+          facebook::memcache::McSetReply&& reply) {
+        EXPECT_EQ(carbon::Result::STORED, *reply.result_ref());
+        baton.post();
+      });
+  baton.wait();
+  baton.reset();
+  facebook::memcache::McGetRequest getReq("hello");
+  conn->sendRequestOne(
+      getReq,
+      [&baton](
+          const facebook::memcache::McGetRequest& /* req */,
+          facebook::memcache::McGetReply&& reply) {
+        EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
+        EXPECT_EQ("world", folly::StringPiece(reply.value_ref()->coalesce()));
+        baton.post();
+      });
+  baton.wait();
+  conn.reset();
+  serverInfo.first->stop();
+  serverInfo.second->join();
+}
+
 TEST(MemcachePooledConnectionTest, PooledExternalConnection) {
-  auto server = facebook::memcache::test::TestServer::create(
-      false /* outOfOrder */, false /* useSsl */);
+  TestServer::Config config;
+  config.outOfOrder = false;
+  config.useSsl = false;
+  auto server = TestServer::create(std::move(config));
   std::vector<std::unique_ptr<facebook::memcache::MemcacheConnection>> conns;
   for (int i = 0; i < 4; i++) {
     conns.push_back(
@@ -71,14 +146,14 @@ TEST(MemcachePooledConnectionTest, PooledExternalConnection) {
       std::make_unique<facebook::memcache::MemcachePooledConnection>(
           std::move(conns));
   facebook::memcache::McSetRequest request("pooled");
-  request.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "connection");
+  request.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "connection");
   folly::fibers::Baton baton;
   pooledConn->sendRequestOne(
       request,
       [&baton](
           const facebook::memcache::McSetRequest& /* req */,
           facebook::memcache::McSetReply&& reply) {
-        EXPECT_EQ(mc_res_stored, reply.result());
+        EXPECT_EQ(carbon::Result::STORED, *reply.result_ref());
         baton.post();
       });
   baton.wait();
@@ -89,8 +164,8 @@ TEST(MemcachePooledConnectionTest, PooledExternalConnection) {
       [&baton](
           const facebook::memcache::McGetRequest& /* req */,
           facebook::memcache::McGetReply&& reply) {
-        EXPECT_EQ(mc_res_found, reply.result());
-        EXPECT_EQ("pooled", folly::StringPiece(reply.value()->coalesce()));
+        EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
+        EXPECT_EQ("pooled", folly::StringPiece(reply.value_ref()->coalesce()));
         baton.post();
       });
   baton.wait();
@@ -103,8 +178,10 @@ TEST(MemcacheInternalConnectionTest, simpleInternalConnection) {
   folly::SingletonVault::singleton()->destroyInstances();
   folly::SingletonVault::singleton()->reenableInstances();
 
-  auto server = facebook::memcache::test::TestServer::create(
-      false /* outOfOrder */, false /* useSsl */);
+  TestServer::Config config;
+  config.outOfOrder = false;
+  config.useSsl = false;
+  auto server = TestServer::create(std::move(config));
   facebook::memcache::McrouterOptions mcrouterOptions;
   mcrouterOptions.num_proxies = 1;
   mcrouterOptions.default_route = "/oregon/*/";
@@ -125,14 +202,14 @@ TEST(MemcacheInternalConnectionTest, simpleInternalConnection) {
   auto conn = std::make_unique<facebook::memcache::MemcacheInternalConnection>(
       "simple-internal-test", mcrouterOptions);
   facebook::memcache::McSetRequest request("internal");
-  request.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "connection");
+  request.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "connection");
   folly::fibers::Baton baton;
   conn->sendRequestOne(
       request,
       [&baton](
           const facebook::memcache::McSetRequest& /* req */,
           facebook::memcache::McSetReply&& reply) {
-        EXPECT_EQ(mc_res_stored, reply.result());
+        EXPECT_EQ(carbon::Result::STORED, *reply.result_ref());
         baton.post();
       });
   baton.wait();
@@ -143,8 +220,9 @@ TEST(MemcacheInternalConnectionTest, simpleInternalConnection) {
       [&baton](
           const facebook::memcache::McGetRequest& /* req */,
           facebook::memcache::McGetReply&& reply) {
-        EXPECT_EQ(mc_res_found, reply.result());
-        EXPECT_EQ("internal", folly::StringPiece(reply.value()->coalesce()));
+        EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
+        EXPECT_EQ(
+            "internal", folly::StringPiece(reply.value_ref()->coalesce()));
         baton.post();
       });
   baton.wait();
@@ -157,8 +235,10 @@ TEST(MemcachePooledConnectionTest, PooledInternalConnection) {
   folly::SingletonVault::singleton()->destroyInstances();
   folly::SingletonVault::singleton()->reenableInstances();
 
-  auto server = facebook::memcache::test::TestServer::create(
-      false /* outOfOrder */, false /* useSsl */);
+  TestServer::Config config;
+  config.outOfOrder = false;
+  config.useSsl = false;
+  auto server = TestServer::create(std::move(config));
   facebook::memcache::McrouterOptions mcrouterOptions;
   mcrouterOptions.num_proxies = 1;
   mcrouterOptions.default_route = "/oregon/*/";
@@ -186,14 +266,14 @@ TEST(MemcachePooledConnectionTest, PooledInternalConnection) {
       std::make_unique<facebook::memcache::MemcachePooledConnection>(
           std::move(conns));
   facebook::memcache::McSetRequest request("pooled");
-  request.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "internal");
+  request.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "internal");
   folly::fibers::Baton baton;
   pooledConn->sendRequestOne(
       request,
       [&baton](
           const facebook::memcache::McSetRequest& /* req */,
           facebook::memcache::McSetReply&& reply) {
-        EXPECT_EQ(mc_res_stored, reply.result());
+        EXPECT_EQ(carbon::Result::STORED, *reply.result_ref());
         baton.post();
       });
   baton.wait();
@@ -204,8 +284,8 @@ TEST(MemcachePooledConnectionTest, PooledInternalConnection) {
       [&baton](
           const facebook::memcache::McGetRequest& /* req */,
           facebook::memcache::McGetReply&& reply) {
-        EXPECT_EQ(mc_res_found, reply.result());
-        EXPECT_EQ("pooled", folly::StringPiece(reply.value()->coalesce()));
+        EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
+        EXPECT_EQ("pooled", folly::StringPiece(reply.value_ref()->coalesce()));
         baton.post();
       });
   baton.wait();

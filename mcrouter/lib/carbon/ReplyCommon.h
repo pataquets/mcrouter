@@ -1,27 +1,26 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
 
-#include "mcrouter/lib/mc/msg.h"
+#include "mcrouter/lib/carbon/MessageCommon.h"
+#include "mcrouter/lib/carbon/gen-cpp2/carbon_result_types.h"
 
 namespace facebook {
 namespace memcache {
 struct AccessPoint;
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook
 
 namespace carbon {
 
-class ReplyCommon {
+class ReplyCommon : public MessageCommon {
  public:
   const std::shared_ptr<const facebook::memcache::AccessPoint>& destination()
       const noexcept {
@@ -39,19 +38,30 @@ class ReplyCommon {
 
 class ReplyCommonThrift : public ReplyCommon {
  public:
-  explicit ReplyCommonThrift(mc_res_t result__ = mc_res_unknown)
+  explicit ReplyCommonThrift(carbon::Result result__ = carbon::Result::UNKNOWN)
       : result_(result__) {}
 
-  mc_res_t result() const {
+  carbon::Result result() const {
     return result_;
   }
 
-  mc_res_t& result() {
+  carbon::Result& result() {
     return result_;
+  }
+
+  apache::thrift::field_ref<const carbon::Result&> result_ref() const& {
+    return {this->result_, __isset.result};
+  }
+
+  apache::thrift::field_ref<carbon::Result&> result_ref() & {
+    return {this->result_, __isset.result};
   }
 
  private:
-  mc_res_t result_{mc_res_unknown};
+  struct __isset {
+    bool result;
+  } __isset = {};
+  carbon::Result result_{carbon::Result::UNKNOWN};
 };
 
-} // carbon
+} // namespace carbon

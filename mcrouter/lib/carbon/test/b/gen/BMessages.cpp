@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -18,13 +16,6 @@
 
 namespace carbon {
 namespace test {
-
-void BaseStruct::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(1 /* field id */, baseInt64Member());
-  writer.writeStructEnd();
-  writer.writeStop();
-}
 
 void BaseStruct::deserialize(carbon::CarbonProtocolReader& reader) {
   reader.readStructBegin();
@@ -49,17 +40,6 @@ void BaseStruct::deserialize(carbon::CarbonProtocolReader& reader) {
     }
   }
   reader.readStructEnd();
-}
-
-void SimpleStruct::serialize(carbon::CarbonProtocolWriter& writer) const {
-  writer.writeStructBegin();
-  writer.writeField(-1 /* field id */, asBaseStruct());
-  writer.writeField(1 /* field id */, int32Member());
-  writer.writeField(2 /* field id */, stringMember());
-  writer.writeField(3 /* field id */, enumMember());
-  writer.writeField(4 /* field id */, vectorMember());
-  writer.writeStructEnd();
-  writer.writeStop();
 }
 
 void SimpleStruct::deserialize(carbon::CarbonProtocolReader& reader) {
@@ -102,6 +82,5 @@ void SimpleStruct::deserialize(carbon::CarbonProtocolReader& reader) {
   }
   reader.readStructEnd();
 }
-
 } // namespace test
 } // namespace carbon

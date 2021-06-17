@@ -1,31 +1,64 @@
-# Copyright (c) 2016, Facebook, Inc.
-# All rights reserved.
+#!/usr/bin/env python3
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+import os
 import unittest
 import time
 
-from mcrouter.test.MCProcess import Mcrouter
+from mcrouter.test.MCProcess import Mcrouter, Memcached, MockMemcached
+
 
 class McrouterTestCase(unittest.TestCase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_mock_mc = False
+
     def ensureClassVariables(self):
         if 'open_servers' not in self.__dict__:
             self.open_servers = []
         if 'open_ports' not in self.__dict__:
             self.open_ports = []
+        if 'open_ports_sr' not in self.__dict__:
+            self.open_ports_sr = []
 
-    def add_server(self, server, logical_port=None):
+    @classmethod
+    def wait_for_file(cls, path, *, retries=0, interval=0.25):
+        interval = interval if interval > 0 else 0.25
+        while True:
+            if os.path.exists(path):
+                return True
+            retries -= 1
+            if retries < 0:
+                return False
+            time.sleep(interval)
+
+    @classmethod
+    def wait_noempty_dir(cls, root, *, retries=0, interval=1):
+        while True:
+            file_count = 0
+            for _, _, files in os.walk(root):
+                file_count += len(files)
+            if file_count > 0:
+                return True
+            retries -= 1
+            if retries < 0:
+                return False
+            time.sleep(interval)
+
+    def add_server(self, server, logical_port=None, sr_routing=False):
         self.ensureClassVariables()
         server.ensure_connected()
         self.open_servers.append(server)
-        self.open_ports.append(server.getport())
+        if sr_routing:
+                self.open_ports_sr.append(server.get_secondary_port())
+        else:
+            if server.getsslport() is not None:
+                self.open_ports.append(server.getsslport())
+            else:
+                self.open_ports.append(server.getport())
 
         if logical_port:
             if 'port_map' not in self.__dict__:
@@ -37,18 +70,24 @@ class McrouterTestCase(unittest.TestCase):
 
         return server
 
-    def add_mcrouter(self, config, route=None, extra_args=[], replace_map=None,
-                     bg_mcrouter=False):
+    def add_mcrouter(self, config, route=None, extra_args=None,
+                     replace_map=None, bg_mcrouter=False, replace_ports=True,
+                     flavor=None, sr_mock_smc_config=None):
         self.ensureClassVariables()
-        substitute_ports = (self.open_ports
-                            if 'port_map' not in self.__dict__
-                            else self.port_map)
+        substitute_ports = None
+        if replace_ports:
+            substitute_ports = (self.open_ports
+                                if 'port_map' not in self.__dict__
+                                else self.port_map)
 
         mcrouter = Mcrouter(config,
                             substitute_config_ports=substitute_ports,
+                            substitute_config_smc_ports=self.open_ports_sr,
                             default_route=route,
                             extra_args=extra_args,
-                            replace_map=replace_map)
+                            replace_map=replace_map,
+                            flavor=flavor,
+                            sr_mock_smc_config=sr_mock_smc_config)
         mcrouter.ensure_connected()
 
         if bg_mcrouter:
@@ -58,6 +97,9 @@ class McrouterTestCase(unittest.TestCase):
             self.open_mcrouters = []
         self.open_mcrouters.append(mcrouter)
         return mcrouter
+
+    def make_memcached(self):
+        return MockMemcached() if self.use_mock_mc else Memcached()
 
     def get_open_ports(self):
         self.ensureClassVariables()
@@ -74,13 +116,20 @@ class McrouterTestCase(unittest.TestCase):
             for server in self.open_servers:
                 server.terminate()
 
-    def eventually_get(self, key, expVal, timeout=5):
+    def eventually_get(self, key, expVal, retries=20):
         start_time = time.time()
         interval = 0.5
-        while (True):
+        while retries > 0:
             if (self.mc.get(key) == expVal):
                 return True
             time.sleep(interval)
-            now = time.time()
-            if (now - start_time > timeout):
-                return False
+            retries -= 1
+        return False
+
+    def _is_mcrouter_running(self, mcrouter):
+        try:
+            return bool(mcrouter.stats())
+
+        except Exception as e:
+            self.assertIsInstance(e, ConnectionResetError)
+            return False

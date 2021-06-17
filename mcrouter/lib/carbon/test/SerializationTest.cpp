@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <limits>
 #include <utility>
 #include <vector>
@@ -25,8 +23,9 @@ TEST(SerializedFormat, integers) {
   auto& matchingRanges = carbon::test::util::satisfiedSubranges<int16_t>;
 
   EXPECT_EQ(
-      (VectorPair{{std::numeric_limits<int16_t>::min(),
-                   std::numeric_limits<int16_t>::max()}}),
+      (VectorPair{
+          {std::numeric_limits<int16_t>::min(),
+           std::numeric_limits<int16_t>::max()}}),
       matchingRanges([](int16_t i) {
         const auto zigzagged = carbon::util::zigzag(i);
         if (i >= 0) {

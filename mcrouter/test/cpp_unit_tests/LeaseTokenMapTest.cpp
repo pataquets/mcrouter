@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <chrono>
 #include <thread>
 
@@ -27,7 +25,7 @@ void assertQueryTrue(
     uint64_t specialToken,
     LeaseTokenMap::Item expectedItem) {
   auto item = map.query(routeName, specialToken);
-  EXPECT_TRUE(item.hasValue());
+  EXPECT_TRUE(item.has_value());
   EXPECT_EQ(item->originalToken, expectedItem.originalToken);
   EXPECT_EQ(item->routeHandleChildIndex, expectedItem.routeHandleChildIndex);
 }
@@ -37,7 +35,7 @@ void assertQueryFalse(
     std::string routeName,
     uint64_t specialToken) {
   auto item = map.query(routeName, specialToken);
-  EXPECT_FALSE(item.hasValue());
+  EXPECT_FALSE(item.has_value());
 }
 
 } // anonymous namespace

@@ -1,3 +1,8 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 SUBDIRS = lib . routes tools test
 
 ACLOCAL_AMFLAGS = -I m4
@@ -26,6 +31,8 @@ libmcroutercore_a_SOURCES = \
   CarbonRouterClient.h \
   CarbonRouterClientBase.cpp \
   CarbonRouterClientBase.h \
+  CarbonRouterFactory.h \
+  CarbonRouterFactory.cpp \
   CarbonRouterInstance-inl.h \
   CarbonRouterInstance.cpp \
   CarbonRouterInstance.h \
@@ -34,11 +41,13 @@ libmcroutercore_a_SOURCES = \
   ConfigApi.cpp \
   ConfigApi.h \
   ConfigApiIf.h \
+  ExecutorObserver.h \
   ExponentialSmoothData.h \
   FileDataProvider.cpp \
   FileDataProvider.h \
   FileObserver.cpp \
   FileObserver.h \
+  ForEachPossibleClient.h \
   flavor.cpp \
   flavor.h \
   LeaseTokenMap.cpp \
@@ -55,6 +64,9 @@ libmcroutercore_a_SOURCES = \
   McrouterLogFailure.h \
   McrouterLogger.cpp \
   McrouterLogger.h \
+  McrouterManager.cpp\
+  McrouterManager.h\
+  lib/network/McCallbackUtils.h \
   Observable-inl.h \
   Observable.h \
   options-template.h \
@@ -65,7 +77,6 @@ libmcroutercore_a_SOURCES = \
   PoolFactory.cpp \
   PoolFactory.h \
   Proxy-inl.h \
-  Proxy.cpp \
   Proxy.h \
   ProxyBase-inl.h \
   ProxyBase.cpp \
@@ -75,8 +86,12 @@ libmcroutercore_a_SOURCES = \
   ProxyConfigBuilder.cpp \
   ProxyConfigBuilder.h \
   ProxyDestination-inl.h \
-  ProxyDestination.cpp \
   ProxyDestination.h \
+  ProxyDestinationBase.cpp \
+  ProxyDestinationBase.h \
+  ProxyDestinationKey.cpp \
+  ProxyDestinationKey.h \
+  ProxyDestinationMap-inl.h \
   ProxyDestinationMap.cpp \
   ProxyDestinationMap.h \
   ProxyRequestContext.cpp \
@@ -88,8 +103,6 @@ libmcroutercore_a_SOURCES = \
   ProxyRequestPriority.h \
   ProxyStats.cpp \
   ProxyStats.h \
-  ProxyThread-inl.h \
-  ProxyThread.h \
   route.cpp \
   route.h \
   routes/AllAsyncRouteFactory.h \
@@ -102,6 +115,8 @@ libmcroutercore_a_SOURCES = \
   routes/BigValueRoute.cpp \
   routes/BigValueRoute.h \
   routes/BigValueRouteIf.h \
+  routes/CarbonLookasideRoute.h \
+  routes/CarbonLookasideRoute.cpp \
   routes/DefaultShadowPolicy.h \
   routes/DestinationRoute.h \
   routes/DevNullRoute.h \
@@ -114,8 +129,11 @@ libmcroutercore_a_SOURCES = \
   routes/FailoverRoute.h \
   routes/FailoverWithExptimeRouteFactory.h \
   routes/HostIdRouteFactory.h \
+  routes/KeySplitRoute.cpp \
+  routes/KeySplitRoute.h \
   routes/L1L2CacheRouteFactory.h \
-  routes/L1L2SizeSplitRouteFactory.h \
+  routes/L1L2SizeSplitRoute.cpp \
+  routes/L1L2SizeSplitRoute.h \
   routes/LatestRoute.h \
   routes/McExtraRouteHandleProvider-inl.h \
   routes/McExtraRouteHandleProvider.h \
@@ -124,6 +142,11 @@ libmcroutercore_a_SOURCES = \
   routes/McRouteHandleBuilder.h \
   routes/McRouteHandleProvider-inl.h \
   routes/McRouteHandleProvider.cpp \
+  routes/McRouteHandleProvider-AllFastestRoute.cpp \
+  routes/McRouteHandleProvider-CarbonLookasideRoute.cpp \
+  routes/McRouteHandleProvider-FailoverRoute.cpp \
+  routes/McRouteHandleProvider-HashRoute.cpp \
+  routes/McRouteHandleProvider-PoolRoute.cpp \
   routes/McRouteHandleProvider.h \
   routes/McrouterRouteHandle.h \
   routes/MigrateRouteFactory.h \
@@ -133,6 +156,7 @@ libmcroutercore_a_SOURCES = \
   routes/NullRoute.cpp \
   routes/OperationSelectorRoute-inl.h \
   routes/OperationSelectorRoute.h \
+  routes/OriginalClientHashRoute.h \
   routes/OutstandingLimitRoute.h \
   routes/PoolRouteUtils.h \
   routes/PrefixSelectorRoute.h \
@@ -141,6 +165,8 @@ libmcroutercore_a_SOURCES = \
   routes/RandomRouteFactory.h \
   routes/RateLimiter.cpp \
   routes/RateLimiter.h \
+  routes/RendezvousRouteHelpers.cpp \
+  routes/RendezvousRouteHelpers.h \
   routes/RateLimitRoute.h \
   routes/RootRoute.h \
   routes/RouteHandleMap-inl.h \
@@ -151,9 +177,12 @@ libmcroutercore_a_SOURCES = \
   routes/ShadowRoute.h \
   routes/ShadowRoute-inl.h \
   routes/ShadowRouteIf.h \
+  routes/ShadowSettings.cpp \
+  routes/ShadowSettings.h \
   routes/ShardHashFunc.cpp \
   routes/ShardHashFunc.h \
   routes/ShardSelectionRouteFactory.h \
+  routes/ShardSelectionRouteFactory-inl.h \
   routes/ShardSelectionRouteFactory.cpp \
   routes/ShardSplitRoute.cpp \
   routes/ShardSplitRoute.h \
@@ -162,6 +191,8 @@ libmcroutercore_a_SOURCES = \
   routes/SlowWarmupRoute.h \
   routes/SlowWarmUpRouteSettings.cpp \
   routes/SlowWarmupRouteSettings.h \
+  routes/StagingRoute.cpp \
+  routes/StagingRoute.h \
   routes/TimeProviderFunc.h \
   routes/WarmUpRoute.cpp \
   routes/WarmUpRoute.h \
@@ -177,30 +208,53 @@ libmcroutercore_a_SOURCES = \
   stats.h \
   ThreadUtil.cpp \
   ThreadUtil.h \
+  ThriftAcceptor.h \
+  ThriftAcceptor.cpp \
   TkoCounters.h \
   TkoLog.cpp \
   TkoLog.h \
   TkoTracker.cpp \
-  TkoTracker.h
+  TkoTracker.h \
+  ExternalStatsHandler.cpp \
+  ExternalStatsHandler.h
 
 mcrouter_SOURCES = \
   main.cpp \
   Server-inl.h \
   Server.h \
   ServerOnRequest.h \
+  RequestAclChecker.h \
+  RequestAclChecker.cpp \
+  StandaloneConfig.cpp \
+  StandaloneConfig.h \
+  StandaloneUtils.cpp \
+  StandaloneUtils.h \
   standalone_options.h \
   standalone_options_list.h
 
 libmcroutercore_a_CPPFLAGS = -I..
 
-mcrouter_LDADD = libmcroutercore.a lib/libmcrouter.a
+# Link order matters.
+mcrouter_LDADD = \
+  libmcroutercore.a \
+  lib/libmcrouter.a \
+  -lthriftcpp2 \
+  -ltransport \
+  -lthriftprotocol \
+  -lrpcmetadata \
+  -lasync \
+  -lconcurrency \
+  -lthrift-core \
+	-lfmt \
+  -lwangle \
+  -lfolly
+
 mcrouter_CPPFLAGS = -I..
 
 clean-local:
-	-rm -f lib/network/gen-cpp2/*.h \
-	       lib/network/gen-cpp2/*.cpp \
-	       lib/network/gen-cpp2/*.o \
-	       lib/network/gen-cpp2/*.tcc
+	-rm -rf lib/network/gen-cpp2/ \
+	        lib/carbon/gen-cpp2/
 
 distclean-local:
-	-rm -rf lib/network/gen-cpp2/
+	-rm -rf lib/network/gen-cpp2/ \
+		lib/carbon/gen-cpp2/

@@ -1,26 +1,22 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <chrono>
 #include <memory>
 
+#include <folly/io/SocketOptionMap.h>
 #include <folly/io/async/AsyncSocket.h>
 
 #include "mcrouter/lib/CompressionCodecManager.h"
 #include "mcrouter/lib/mc/protocol.h"
 #include "mcrouter/lib/network/AccessPoint.h"
-
-namespace folly {
-class SSLContext;
-} // folly
+#include "mcrouter/lib/network/SecurityOptions.h"
 
 namespace facebook {
 namespace memcache {
@@ -29,13 +25,15 @@ namespace memcache {
  * A struct for storing all connection related options.
  */
 struct ConnectionOptions {
-  using SocketOptions = folly::AsyncSocket::OptionMap;
+  using SocketOptions = folly::SocketOptionMap;
 
   ConnectionOptions(
       folly::StringPiece host_,
       uint16_t port_,
-      mc_protocol_t protocol_)
-      : accessPoint(std::make_shared<AccessPoint>(host_, port_, protocol_)) {}
+      mc_protocol_t protocol_,
+      SecurityMech mech_ = SecurityMech::NONE)
+      : accessPoint(
+            std::make_shared<AccessPoint>(host_, port_, protocol_, mech_)) {}
 
   explicit ConnectionOptions(std::shared_ptr<const AccessPoint> ap)
       : accessPoint(std::move(ap)) {}
@@ -64,7 +62,19 @@ struct ConnectionOptions {
   int tcpKeepAliveInterval{0};
 
   /**
-   * Write/connect timeout in ms.
+   * The number of times to retry establishing a connection in case of a
+   * connect timeout. We will just return the result back to the client after
+   * either the connection is esblished, or we exhausted all retries.
+   */
+  unsigned int numConnectTimeoutRetries{0};
+
+  /**
+   * Connect timeout in ms.
+   */
+  std::chrono::milliseconds connectTimeout{0};
+
+  /**
+   * Write timeout in ms.
    */
   std::chrono::milliseconds writeTimeout{0};
 
@@ -84,13 +94,6 @@ struct ConnectionOptions {
   unsigned int qosPath{0};
 
   /**
-   * SSLContext provider callback. If null, then unsecured connections will be
-   * established, else it will be called for each attempt to establish
-   * connection.
-   */
-  std::function<std::shared_ptr<folly::SSLContext>()> sslContextProvider;
-
-  /**
    * Path of the debug fifo.
    * If empty, debug fifo is disabled.
    */
@@ -104,9 +107,9 @@ struct ConnectionOptions {
   folly::StringPiece routerInfoName;
 
   /**
-   * enable ssl session caching
+   * Security options for this connection
    */
-  bool sessionCachingEnabled{false};
+  SecurityOptions securityOpts;
 
   /**
    * Use JemallocNodumpAllocator
@@ -120,9 +123,15 @@ struct ConnectionOptions {
   const CompressionCodecMap* compressionCodecMap{nullptr};
 
   /**
-   * Service identity of the destination service when SSL is used.
+   * True to enable thrift compression.
    */
-  std::string sslServiceIdentity;
+  bool thriftCompression{false};
+
+  /**
+   * Payloads >= thriftCompressionTreshold will be compressed
+   * iff thriftCompression is enabled.
+   */
+  size_t thriftCompressionThreshold{0};
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

@@ -1,3 +1,8 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 bin_PROGRAMS = mcpiper
 
 mcpiper_SOURCES = \
@@ -29,5 +34,18 @@ mcpiper_SOURCES = \
 	Util.h \
 	ValueFormatter.h
 
-mcpiper_LDADD = $(top_srcdir)/lib/libmcrouter.a
+mcpiper_LDADD = \
+	$(top_srcdir)/lib/libmcrouter.a \
+	-lthriftcpp2 \
+	-ltransport \
+	-lthriftprotocol \
+	-lrpcmetadata \
+	-lasync \
+	-lconcurrency \
+	-lthrift-core \
+	-lfizz \
+	-lfmt \
+	-lwangle \
+	-lfolly
+
 mcpiper_CPPFLAGS = -I$(top_srcdir)/..

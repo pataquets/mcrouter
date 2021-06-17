@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -15,14 +13,15 @@
 
 #include "mcrouter/CarbonRouterInstanceBase.h"
 #include "mcrouter/LeaseTokenMap.h"
+#include "mcrouter/McReqUtil.h"
 #include "mcrouter/McrouterFiberContext.h"
 #include "mcrouter/ProxyRequestContextTyped.h"
 #include "mcrouter/config.h"
 #include "mcrouter/lib/FailoverContext.h"
 #include "mcrouter/lib/FailoverErrorsSettings.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/routes/FailoverPolicy.h"
 #include "mcrouter/routes/FailoverRateLimiter.h"
 
@@ -58,7 +57,10 @@ inline std::string getFailoverRouteName(std::string name, size_t numTargets) {
  * until the first non-error reply.  If all replies result in errors, returns
  * the last destination's reply.
  */
-template <class RouterInfo, typename FailoverPolicyT>
+template <
+    class RouterInfo,
+    typename FailoverPolicyT,
+    typename FailoverErrorsSettingsT = FailoverErrorsSettings>
 class FailoverRoute {
  private:
   using RouteHandleIf = typename RouterInfo::RouteHandleIf;
@@ -72,19 +74,32 @@ class FailoverRoute {
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
     if (fiber_local<RouterInfo>::getFailoverDisabled()) {
-      t(*targets_[0], req);
-    } else {
-      t(targets_, req);
+      return t(*targets_[0], req); // normal route
     }
+    auto iter = failoverPolicy_.cbegin(req);
+    // normal route
+    // This must be called here so that selectedIndex is set and the failover
+    // iterator below does not select the index from normal route.
+    if (t(*targets_[0], req)) {
+      return true;
+    }
+    std::vector<std::shared_ptr<RouteHandleIf>> failovers;
+    ++iter;
+    while (iter != failoverPolicy_.cend(req)) {
+      std::shared_ptr<RouteHandleIf> rh = targets_[iter.getTrueIndex()];
+      failovers.push_back(rh);
+      ++iter;
+    }
+    return t(failovers, req);
   }
 
   FailoverRoute(
       std::vector<std::shared_ptr<RouteHandleIf>> targets,
-      FailoverErrorsSettings failoverErrors,
+      FailoverErrorsSettingsT failoverErrors,
       std::unique_ptr<FailoverRateLimiter> rateLimiter,
       bool failoverTagging,
       bool enableLeasePairing,
@@ -97,7 +112,7 @@ class FailoverRoute {
         failoverTagging_(failoverTagging),
         failoverPolicy_(targets_, policyConfig),
         enableLeasePairing_(enableLeasePairing) {
-    assert(targets_.size() > 1);
+    assert(!targets_.empty());
     assert(!enableLeasePairing_ || !name_.empty());
   }
 
@@ -116,13 +131,14 @@ class FailoverRoute {
     // Look into LeaseTokenMap
     auto& proxy = fiber_local<RouterInfo>::getSharedCtx()->proxy();
     auto& map = proxy.router().leaseTokenMap();
-    if (auto item = map.query(name_, req.leaseToken())) {
+    if (auto item = map.query(name_, *req.leaseToken_ref())) {
       auto mutReq = req;
-      mutReq.leaseToken() = item->originalToken;
+      mutReq.leaseToken_ref() = item->originalToken;
       proxy.stats().increment(redirected_lease_set_count_stat);
       if (targets_.size() <= item->routeHandleChildIndex) {
-        McLeaseSetReply errorReply(mc_res_local_error);
-        errorReply.message() = "LeaseSet failover destination out-of-range.";
+        McLeaseSetReply errorReply(carbon::Result::LOCAL_ERROR);
+        errorReply.message_ref() =
+            "LeaseSet failover destination out-of-range.";
         return errorReply;
       }
       return targets_[item->routeHandleChildIndex]->route(mutReq);
@@ -135,7 +151,7 @@ class FailoverRoute {
   McLeaseGetReply route(const McLeaseGetRequest& req) {
     size_t childIndex = 0;
     auto reply = doRoute(req, childIndex);
-    const auto leaseToken = reply.leaseToken();
+    const auto leaseToken = *reply.leaseToken_ref();
 
     if (!enableLeasePairing_ || leaseToken <= 1) {
       return reply;
@@ -152,7 +168,7 @@ class FailoverRoute {
     if (childIndex > 0 || map.conflicts(leaseToken)) {
       auto specialToken =
           map.insert(name_, {static_cast<uint64_t>(leaseToken), childIndex});
-      reply.leaseToken() = specialToken;
+      reply.leaseToken_ref() = specialToken;
     }
 
     return reply;
@@ -161,22 +177,9 @@ class FailoverRoute {
  protected:
   const std::string name_;
 
-  virtual bool additionalFailoverCheck(
-      mc_res_t /* unused */,
-      folly::StringPiece /* unused */,
-      const folly::IOBuf& /* unused */) const {
-    return false;
-  }
-
  private:
-  enum class FailoverType {
-    NONE,
-    NORMAL,
-    CONDITIONAL,
-  };
-
   const std::vector<std::shared_ptr<RouteHandleIf>> targets_;
-  const FailoverErrorsSettings failoverErrors_;
+  const FailoverErrorsSettingsT failoverErrors_;
   std::unique_ptr<FailoverRateLimiter> rateLimiter_;
   const bool failoverTagging_{false};
   FailoverPolicyT failoverPolicy_;
@@ -188,114 +191,174 @@ class FailoverRoute {
     return doRoute(req, tmp);
   }
 
+  template <class Request, class Iterator>
+  bool processReply(
+      const ReplyT<Request>& reply,
+      const Request& req,
+      bool& conditionalFailover,
+      Iterator& iter,
+      FailoverPolicyContext& ctx) {
+    auto res = shouldFailover(reply, req);
+    if (LIKELY(res == FailoverErrorsSettingsBase::FailoverType::NONE)) {
+      return true;
+    }
+    if (res == FailoverErrorsSettingsBase::FailoverType::CONDITIONAL) {
+      conditionalFailover = true;
+    }
+
+    auto& proxy = fiber_local<RouterInfo>::getSharedCtx()->proxy();
+    if (isErrorResult(*reply.result_ref())) {
+      if (!isTkoOrHardTkoResult(*reply.result_ref())) {
+        proxy.stats().increment(failover_policy_result_error_stat);
+      } else {
+        proxy.stats().increment(failover_policy_tko_error_stat);
+        // If it is Tko or Hard Tko set the failure domain so that
+        // we do not pick next failover target from the same failure domain
+        if (reply.destination()) {
+          iter.setFailedDomain(reply.destination()->getFailureDomain());
+        }
+      }
+    }
+    if (!isTkoOrHardTkoResult(*reply.result_ref())) {
+      if (rateLimiter_ && !rateLimiter_->failoverAllowed()) {
+        proxy.stats().increment(failover_rate_limited_stat);
+        return true;
+      }
+      // We didn't do any work for TKO or hard TKO. Don't count it as a try.
+      if (!failoverPolicy_.excludeError(*reply.result_ref())) {
+        ++ctx.numTries_;
+      }
+    }
+
+    return false;
+  }
+
   template <class Request>
   ReplyT<Request> doRoute(const Request& req, size_t& childIndex) {
     auto& proxy = fiber_local<RouterInfo>::getSharedCtx()->proxy();
 
     bool conditionalFailover = false;
+    bool allFailed = false;
     SCOPE_EXIT {
       if (conditionalFailover) {
         proxy.stats().increment(failover_conditional_stat);
+        proxy.stats().increment(failover_conditional_count_stat);
+      }
+      if (allFailed) {
+        proxy.stats().increment(failover_all_failed_stat);
+        proxy.stats().increment(failover_all_failed_count_stat);
+        proxy.stats().increment(failoverPolicy_.getFailoverFailedStat());
       }
     };
 
-    auto iter = failoverPolicy_.begin();
-    auto normalReply = iter->route(req);
-    ++iter;
-    childIndex = 0;
+    auto policyCtx = failoverPolicy_.context(req);
+    auto iter = failoverPolicy_.begin(req);
+    auto normalReply = iter->route(req, policyCtx);
     if (rateLimiter_) {
       rateLimiter_->bumpTotalReqs();
     }
     if (fiber_local<RouterInfo>::getSharedCtx()->failoverDisabled()) {
       return normalReply;
     }
-    switch (shouldFailover(normalReply, req)) {
-      case FailoverType::NONE:
-        return normalReply;
-      case FailoverType::CONDITIONAL:
-        conditionalFailover = true;
-        break;
-      default:
-        break;
+    if (failoverTagging_) {
+      setFailoverHopCount(normalReply, getFailoverHopCount(req));
     }
-
-    proxy.stats().increment(failover_all_stat);
-
-    if (rateLimiter_ && !rateLimiter_->failoverAllowed()) {
-      proxy.stats().increment(failover_rate_limited_stat);
+    if (LIKELY(processReply(
+            normalReply, req, conditionalFailover, iter, policyCtx))) {
       return normalReply;
     }
+    if (++iter == failoverPolicy_.end(req)) {
+      if (isErrorResult(*normalReply.result_ref())) {
+        allFailed = true;
+      }
+      return normalReply;
+    }
+    proxy.stats().increment(failover_all_stat);
+    proxy.stats().increment(failoverPolicy_.getFailoverStat());
 
+    childIndex = 0;
     // Failover
-    return fiber_local<RouterInfo>::runWithLocals(
-        [this,
-         iter,
-         &req,
-         &proxy,
-         &normalReply,
-         &childIndex,
-         &conditionalFailover]() {
-          fiber_local<RouterInfo>::setFailoverTag(failoverTagging_);
-          fiber_local<RouterInfo>::addRequestClass(RequestClass::kFailover);
-          auto doFailover = [this, &req, &proxy, &normalReply](
-              typename FailoverPolicyT::Iterator& child) {
-            auto failoverReply = child->route(req);
-            FailoverContext failoverContext(
-                child.getTrueIndex(),
-                targets_.size() - 1,
-                req,
-                normalReply,
-                failoverReply);
-            logFailover(proxy, failoverContext);
-            return failoverReply;
-          };
+    return fiber_local<RouterInfo>::runWithLocals([this,
+                                                   iter,
+                                                   &req,
+                                                   &proxy,
+                                                   &normalReply,
+                                                   &policyCtx,
+                                                   &childIndex,
+                                                   &allFailed,
+                                                   &conditionalFailover]() {
+      fiber_local<RouterInfo>::addRequestClass(RequestClass::kFailover);
+      auto doFailover = [this, &req, &proxy, &normalReply, &policyCtx](
+                            auto& child) {
+        uint32_t cnt =
+            failoverTagging_ ? fiber_local<RouterInfo>::incFailoverCount() : 0;
+        auto failoverReply = child->route(req, policyCtx);
+        if (failoverTagging_) {
+          setFailoverHopCount(failoverReply, getFailoverHopCount(req) + cnt);
+        }
+        FailoverContext failoverContext(
+            child.getTrueIndex(),
+            targets_.size() - 1,
+            req,
+            failoverPolicy_.getFailureDomainsEnabled(),
+            normalReply,
+            failoverReply);
+        logFailover(proxy, failoverContext);
+        carbon::setIsFailoverIfPresent(failoverReply, true);
+        return failoverReply;
+      };
 
-          auto cur = iter;
-          // set the index of the child that generated the reply.
-          SCOPE_EXIT {
-            childIndex = cur.getTrueIndex();
-          };
-          auto nx = cur;
-          for (++nx; nx != failoverPolicy_.end(); ++cur, ++nx) {
-            auto failoverReply = doFailover(cur);
-            switch (shouldFailover(failoverReply, req)) {
-              case FailoverType::NONE:
-                return failoverReply;
-              case FailoverType::CONDITIONAL:
-                conditionalFailover = true;
-                break;
-              default:
-                break;
+      auto cur = iter;
+      // set the index of the child that generated the reply.
+      SCOPE_EXIT {
+        childIndex = cur.getTrueIndex();
+      };
+      auto nx = cur;
+      // Passive iterator does not do routing
+      nx.setPassive();
+
+      auto incFailureDomainStat =
+          [&proxy](ReplyT<Request>& nReply, ReplyT<Request>& fReply) {
+            if (nReply.destination() && fReply.destination() &&
+                (nReply.destination()->getFailureDomain() ==
+                 fReply.destination()->getFailureDomain())) {
+              proxy.stats().increment(failover_same_failure_domain_stat, 1);
             }
-          }
+          };
 
-          auto failoverReply = doFailover(cur);
-          if (isErrorResult(failoverReply.result())) {
-            proxy.stats().increment(failover_all_failed_stat);
-          }
-
+      ReplyT<Request> failoverReply;
+      for (++nx; nx != failoverPolicy_.end(req) &&
+           policyCtx.numTries_ < failoverPolicy_.maxErrorTries();
+           ++cur, ++nx) {
+        failoverReply = doFailover(cur);
+        incFailureDomainStat(normalReply, failoverReply);
+        if (LIKELY(processReply(
+                failoverReply, req, conditionalFailover, cur, policyCtx))) {
           return failoverReply;
-        });
-  }
+        }
+      }
+      if (policyCtx.numTries_ < failoverPolicy_.maxErrorTries()) {
+        failoverReply = doFailover(cur);
+        incFailureDomainStat(normalReply, failoverReply);
+        if (isErrorResult(*failoverReply.result_ref())) {
+          allFailed = true;
+        }
+      }
+      proxy.stats().increment(
+          failover_num_collisions_stat, cur.getStats().num_collisions);
+      proxy.stats().increment(
+          failover_num_failed_domain_collisions_stat,
+          cur.getStats().num_failed_domain_collisions);
 
-  // TODO t15812771 update this to work with all UpdateLike requests
-  FailoverType shouldFailover(const McSetReply& reply, const McSetRequest& req)
-      const {
-    if (failoverErrors_.shouldFailover(reply, req)) {
-      return FailoverType::NORMAL;
-    }
-    if (additionalFailoverCheck(
-            reply.result(), req.key().fullKey(), req.value())) {
-      return FailoverType::CONDITIONAL;
-    }
-    return FailoverType::NONE;
+      return failoverReply;
+    });
   }
 
   template <class Request>
-  FailoverType shouldFailover(const ReplyT<Request>& reply, const Request& req)
-      const {
-    return failoverErrors_.shouldFailover(reply, req) ? FailoverType::NORMAL
-                                                      : FailoverType::NONE;
+  FailoverErrorsSettingsBase::FailoverType shouldFailover(
+      const ReplyT<Request>& reply,
+      const Request& req) const {
+    return failoverErrors_.shouldFailover(reply, req);
   }
 };
 
@@ -305,8 +368,8 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> makeFailoverRoute(
     const folly::dynamic& json,
     ExtraRouteHandleProviderIf<RouterInfo>& extraProvider);
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "mcrouter/routes/FailoverRoute-inl.h"

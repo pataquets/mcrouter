@@ -1,21 +1,20 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/Range.h>
 
+#include "mcrouter/lib/HashFunctionType.h"
 #include "mcrouter/lib/fbi/hash.h"
 
 namespace folly {
 struct dynamic;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -33,9 +32,12 @@ class Crc32HashFunc {
   static const char* type() {
     return "Crc32";
   }
+  static HashFunctionType typeId() {
+    return HashFunctionType::CRC32;
+  }
 
  private:
   size_t n_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

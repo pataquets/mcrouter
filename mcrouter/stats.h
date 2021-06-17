@@ -1,20 +1,19 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
 #include <unordered_map>
 
 #include <folly/Range.h>
+#include <folly/synchronization/AtomicRef.h>
 
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 namespace facebook {
 namespace memcache {
@@ -34,6 +33,7 @@ namespace mcrouter {
 #define STUIR STAT
 #define STSI STAT
 #define STSS STAT
+#define EXTERNAL_STAT(name)
 enum stat_name_t {
 #include "stat_list.h"
   num_stats,
@@ -43,6 +43,7 @@ enum stat_name_t {
 #undef STUIR
 #undef STSI
 #undef STSS
+#undef EXTERNAL_STAT
 
 // Forward declarations
 class CarbonRouterInstanceBase;
@@ -63,7 +64,7 @@ enum stat_type_t {
 };
 
 enum stat_group_t {
-  mcproxy_stats = 0x1,
+  basic_stats = 0x1,
   detailed_stats = 0x2,
   cmd_error_stats = 0x20,
   ods_stats = 0x40,
@@ -74,6 +75,7 @@ enum stat_group_t {
   all_stats = 0xffff,
   server_stats = 0x10000,
   suspect_server_stats = 0x40000,
+  external_stats = 0x80000,
   unknown_stats = 0x10000000,
 };
 
@@ -90,20 +92,85 @@ struct stat_t {
     double dbl;
     void* pointer;
   } data;
+
+  stat_t() = default;
+
+  stat_t(const stat_t& from)
+      : name(from.name),
+        group(from.group),
+        type(from.type),
+        aggregate(from.aggregate) {
+    // It doesn't matter which field we take (as long as it's a maximum width
+    // field), we just want to copy these bytes atomically.
+    data.uint64 =
+        folly::make_atomic_ref(const_cast<uint64_t&>(from.data.uint64))
+            .load(std::memory_order_relaxed);
+  }
+
+  // No particular reason to disable, but just unnecessary.
+  stat_t& operator=(const stat_t& from) = delete;
 };
 
 void init_stats(stat_t* stats);
 
-inline void stat_incr(stat_t* stats, stat_name_t stat_num, int64_t amount) {
-  stats[stat_num].data.uint64 += amount;
+FOLLY_ALWAYS_INLINE uint64_t
+stat_fetch_add(stat_t* stats, stat_name_t stat_num, int64_t amount) {
+  auto ref = folly::make_atomic_ref(stats[stat_num].data.uint64);
+  return ref.fetch_add(amount, std::memory_order_relaxed);
 }
 
-inline void stat_decr(stat_t* stats, stat_name_t stat_num, int64_t amount) {
+FOLLY_ALWAYS_INLINE void
+stat_incr(stat_t* stats, stat_name_t stat_num, int64_t amount) {
+  auto ref = folly::make_atomic_ref(stats[stat_num].data.uint64);
+  ref.store(
+      ref.load(std::memory_order_relaxed) + amount, std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE void
+stat_decr(stat_t* stats, stat_name_t stat_num, int64_t amount) {
   stat_incr(stats, stat_num, -amount);
 }
 
-void stat_incr_safe(stat_t*, stat_name_t, int64_t amount = 1);
-void stat_decr_safe(stat_t*, stat_name_t);
+FOLLY_ALWAYS_INLINE void
+stat_incr(stat_t* stats, stat_name_t stat_num, double amount) {
+  auto ref = folly::make_atomic_ref(stats[stat_num].data.dbl);
+  ref.store(
+      ref.load(std::memory_order_relaxed) + amount, std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE void
+stat_div(stat_t* stats, stat_name_t stat_num, double amount) {
+  auto ref = folly::make_atomic_ref(stats[stat_num].data.dbl);
+  ref.store(
+      ref.load(std::memory_order_relaxed) / amount, std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE
+void stat_set(stat_t* stats, stat_name_t stat_num, uint64_t value) {
+  stat_t* stat = &stats[stat_num];
+  assert(stat->type == stat_uint64);
+  folly::make_atomic_ref(stat->data.uint64)
+      .store(value, std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE
+void stat_set(stat_t* stats, stat_name_t stat_num, double value) {
+  stat_t* stat = &stats[stat_num];
+  assert(stat->type == stat_double);
+  folly::make_atomic_ref(stat->data.dbl)
+      .store(value, std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE uint64_t
+stat_get_uint64(stat_t* stats, stat_name_t stat_num) {
+  return folly::make_atomic_ref(stats[stat_num].data.uint64)
+      .load(std::memory_order_relaxed);
+}
+
+FOLLY_ALWAYS_INLINE double stat_get_dbl(stat_t* stats, stat_name_t stat_num) {
+  return folly::make_atomic_ref(stats[stat_num].data.dbl)
+      .load(std::memory_order_relaxed);
+}
 
 /**
  * Current aggregation of rate of stats[idx] (which must be an aggregated
@@ -128,14 +195,14 @@ uint64_t stats_aggregate_max_max_value(
     const CarbonRouterInstanceBase& router,
     int idx);
 
-void stat_set_uint64(stat_t*, stat_name_t, uint64_t);
-uint64_t stat_get_uint64(const stat_t*, stat_name_t);
-uint64_t stat_get_config_age(const stat_t* stats, uint64_t now);
 McStatsReply stats_reply(ProxyBase*, folly::StringPiece);
 void prepare_stats(CarbonRouterInstanceBase& router, stat_t* stats);
+void append_pool_stats(
+    CarbonRouterInstanceBase& router,
+    std::vector<stat_t>& stats);
 
 void set_standalone_args(folly::StringPiece args);
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

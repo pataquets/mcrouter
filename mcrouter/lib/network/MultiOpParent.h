@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
@@ -14,7 +12,7 @@
 #include <folly/Optional.h>
 
 #include "mcrouter/lib/network/McServerRequestContext.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 namespace facebook {
 namespace memcache {
@@ -58,7 +56,8 @@ class MultiOpParent {
    * @return true if the parent assumed ownership of reporting an error.
    *         On true, errorMessage is moved out of.
    */
-  bool reply(mc_res_t result, uint32_t errorCode, std::string&& errorMessage);
+  bool
+  reply(carbon::Result result, uint32_t errorCode, std::string&& errorMessage);
 
   /**
    * Notify that a sub request is waiting for a reply.
@@ -91,5 +90,5 @@ class MultiOpParent {
 
   void release();
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

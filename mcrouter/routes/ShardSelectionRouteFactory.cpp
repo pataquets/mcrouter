@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "ShardSelectionRouteFactory.h"
 
 #include <algorithm>
@@ -65,6 +63,8 @@ std::vector<size_t> parseShardsJsonString(const folly::dynamic& shardsJson) {
   return shards;
 }
 
+} // namespace
+
 std::vector<std::vector<size_t>> parseAllShardsJson(
     const folly::dynamic& allShardsJson) {
   assert(allShardsJson.isArray());
@@ -89,113 +89,16 @@ std::vector<std::vector<size_t>> parseAllShardsJson(
   return allShards;
 }
 
-size_t getMaxShardId(const std::vector<std::vector<size_t>>& allShards) {
-  size_t maxShardId = 0;
-  for (const auto& shards : allShards) {
-    for (auto shardId : shards) {
-      maxShardId = std::max(maxShardId, shardId);
-    }
+std::vector<size_t> parseShardsPerServerJson(const folly::dynamic& jShards) {
+  if (jShards.isArray()) {
+    return parseShardsJsonArray(jShards);
+  } else if (jShards.isString()) {
+    return parseShardsJsonString(jShards);
+  } else {
+    throwLogic(
+        "EagerShardSelectionRoute: 'shards[...]' must be an array of "
+        "integers or a string of comma-separated shard ids.");
   }
-  return maxShardId;
-}
-
-} // namespace
-
-const folly::dynamic& getPoolJson(const folly::dynamic& json) {
-  assert(json.isObject());
-
-  auto poolJson = json.get_ptr("pool");
-  checkLogic(poolJson, "ShardSelectionRoute: 'pool' not found");
-  return *poolJson;
-}
-
-const folly::dynamic& getShardsJson(const folly::dynamic& json) {
-  assert(json.isObject());
-
-  auto shardsJson = json.get_ptr("shards");
-  checkLogic(
-      shardsJson && shardsJson->isArray(),
-      "ShardSelectionRoute: 'shards' not found or not an array");
-  return *shardsJson;
-}
-
-template <>
-std::vector<uint16_t> getShardsMap(
-    const folly::dynamic& json,
-    size_t numDestinations) {
-  assert(json.isArray());
-
-  checkLogic(
-      numDestinations < std::numeric_limits<uint16_t>::max(),
-      "ShardSelectionRoute: Only up to {} destinations are supported. "
-      "Current number of destinations: {}",
-      std::numeric_limits<uint16_t>::max() - 1,
-      numDestinations);
-
-  // Validate and get a list of shards.
-  auto allShards = parseAllShardsJson(json);
-
-  size_t shardsMapSize = getMaxShardId(allShards) + 1;
-  constexpr uint16_t kNoDestination = std::numeric_limits<uint16_t>::max();
-  std::vector<uint16_t> shardsMap(shardsMapSize, kNoDestination);
-
-  // We don't need to validate here, as it was validated before.
-  for (size_t i = 0; i < allShards.size(); ++i) {
-    for (size_t j = 0; j < allShards[i].size(); ++j) {
-      size_t shard = allShards[i][j];
-      if (shardsMap[shard] == kNoDestination || shardsMap[shard] == i) {
-        shardsMap[shard] = i;
-      } else {
-        LOG(WARNING) << "ShardSelectionRoute: shard " << shard
-                     << " is served by two destinations (" << shardsMap[shard]
-                     << " and " << i << "). Picking one destination randomly.";
-        if (folly::Random::oneIn(2)) {
-          shardsMap[shard] = i;
-        }
-      }
-    }
-  }
-
-  return shardsMap;
-}
-
-template <>
-std::unordered_map<uint32_t, uint16_t> getShardsMap(
-    const folly::dynamic& json,
-    size_t numDestinations) {
-  assert(json.isArray());
-
-  checkLogic(
-      numDestinations < std::numeric_limits<uint16_t>::max(),
-      "ShardSelectionRoute: Only up to {} destinations are supported. "
-      "Current number of destinations: {}",
-      std::numeric_limits<uint16_t>::max() - 1,
-      numDestinations);
-
-  // Validate and get a list of shards.
-  auto allShards = parseAllShardsJson(json);
-
-  constexpr uint16_t kNoDestination = std::numeric_limits<uint16_t>::max();
-  std::unordered_map<uint32_t, uint16_t> shardsMap;
-
-  // We don't need to validate here, as it was validated before.
-  for (size_t i = 0; i < allShards.size(); ++i) {
-    for (size_t j = 0; j < allShards[i].size(); ++j) {
-      size_t shard = allShards[i][j];
-      if (shardsMap[shard] == kNoDestination || shardsMap[shard] == i) {
-        shardsMap[shard] = i;
-      } else {
-        LOG(WARNING) << "ShardSelectionRoute: shard " << shard
-                     << " is served by two destinations (" << shardsMap[shard]
-                     << " and " << i << "). Picking one destination randomly.";
-        if (folly::Random::oneIn(2)) {
-          shardsMap[shard] = i;
-        }
-      }
-    }
-  }
-
-  return shardsMap;
 }
 
 } // namespace detail

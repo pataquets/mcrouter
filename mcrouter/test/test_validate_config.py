@@ -1,14 +1,8 @@
-# Copyright (c) 2016-present, Facebook, Inc.
-# All rights reserved.
+#!/usr/bin/env python3
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import socket
 from subprocess import Popen
@@ -23,7 +17,7 @@ class TestValidateConfig(unittest.TestCase):
     invalid_config = 'mcrouter/test/invalid_config.json'
     extra_args = []
 
-    def try_mcrouter(self, config):
+    def try_mcrouter(self, config: str) -> int:
         listen_sock = socket.socket()
         listen_sock.listen(100)
         cmd = McrouterGlobals.preprocessArgs([
@@ -36,10 +30,10 @@ class TestValidateConfig(unittest.TestCase):
             '--validate-config',
         ] + self.extra_args)
         proc = Popen(cmd)
-        for _i in range(50):
+        for _i in range(20):
             if proc.poll() is not None:
                 break
-            time.sleep(0.1)
+            time.sleep(1)
 
         ret = proc.returncode
 
@@ -49,11 +43,11 @@ class TestValidateConfig(unittest.TestCase):
 
         return ret
 
-    def test_valid_config(self):
+    def test_valid_config(self) -> None:
         ret = self.try_mcrouter(self.valid_config)
         self.assertEqual(ret, 0)
 
-    def test_invalid_config(self):
+    def test_invalid_config(self) -> None:
         ret = self.try_mcrouter(self.invalid_config)
         self.assertNotEqual(ret, 0)
         self.assertNotEqual(ret, None)

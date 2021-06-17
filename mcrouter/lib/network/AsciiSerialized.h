@@ -1,19 +1,17 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/Optional.h>
 #include <folly/Range.h>
 
-#include "mcrouter/lib/McOperation.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/CarbonMessageList.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/lib/network/gen/MemcacheRoutingGroups.h"
 
 namespace facebook {
@@ -45,6 +43,11 @@ class AsciiSerializedRequest {
   bool
   prepare(const Request& request, const struct iovec*& iovOut, size_t& niovOut);
 
+  /**
+   * Returns the size of the request.
+   */
+  size_t getSize() const;
+
  private:
   // We need at most 5 iovecs (lease-set):
   //   command + key + printBuffer + value + "\r\n"
@@ -55,6 +58,7 @@ class AsciiSerializedRequest {
 
   struct iovec iovs_[kMaxIovs];
   size_t iovsCount_{0};
+  size_t iovsTotalLen_{0};
   char printBuffer_[kMaxBufferLength];
 
   void addString(folly::ByteRange range);
@@ -73,6 +77,8 @@ class AsciiSerializedRequest {
   void prepareImpl(const McGetsRequest& request);
   void prepareImpl(const McMetagetRequest& request);
   void prepareImpl(const McLeaseGetRequest& request);
+  void prepareImpl(const McGatRequest& request);
+  void prepareImpl(const McGatsRequest& request);
   // Update-like ops.
   void prepareImpl(const McSetRequest& request);
   void prepareImpl(const McAddRequest& request);
@@ -178,9 +184,11 @@ class AsciiSerializedReply {
   void prepareImpl(McGetsReply&& reply, folly::StringPiece key);
   void prepareImpl(McMetagetReply&& reply, folly::StringPiece key);
   void prepareImpl(McLeaseGetReply&& reply, folly::StringPiece key);
+  void prepareImpl(McGatReply&& reply, folly::StringPiece key);
+  void prepareImpl(McGatsReply&& reply, folly::StringPiece key);
   // Update-like ops
   void prepareUpdateLike(
-      mc_res_t result,
+      carbon::Result result,
       uint16_t errorCode,
       std::string&& message,
       const char* requestName);
@@ -193,7 +201,7 @@ class AsciiSerializedReply {
   void prepareImpl(McLeaseSetReply&& reply);
   // Arithmetic-like ops
   void prepareArithmeticLike(
-      mc_res_t result,
+      carbon::Result result,
       const uint64_t delta,
       uint16_t errorCode,
       std::string&& message,
@@ -215,10 +223,11 @@ class AsciiSerializedReply {
   void prepareImpl(McFlushReReply&&);
   void prepareImpl(McFlushAllReply&&);
   // Server and client error helper
-  void handleError(mc_res_t result, uint16_t errorCode, std::string&& message);
-  void handleUnexpected(mc_res_t result, const char* requestName);
+  void
+  handleError(carbon::Result result, uint16_t errorCode, std::string&& message);
+  void handleUnexpected(carbon::Result result, const char* requestName);
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook
 
 #include "AsciiSerialized-inl.h"

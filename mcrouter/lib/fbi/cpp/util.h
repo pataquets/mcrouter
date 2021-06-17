@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <sys/time.h>
@@ -17,12 +15,13 @@
 #include <folly/Format.h>
 #include <folly/Likely.h>
 #include <folly/Range.h>
+#include <folly/json.h>
 
 using timeval_t = struct timeval;
 
 namespace folly {
 struct dynamic;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -184,7 +183,7 @@ bool appendStringToFile(folly::StringPiece contents, const std::string& path);
  * and then calls 'rename()', which is atomic.
  *
  * @return true on success, false otherwise
-*/
+ */
 bool atomicallyWriteFileToDisk(
     folly::StringPiece contents,
     const std::string& absFilename);
@@ -194,7 +193,7 @@ bool atomicallyWriteFileToDisk(
  * doesn't exist creates it.
  *
  * @return true on success, false otherwise
-*/
+ */
 bool touchFile(const std::string& path);
 
 /**
@@ -221,10 +220,17 @@ typename std::enable_if<RNG::word_size == 64, uint64_t>::type randomInt64(
 std::string getThreadName();
 
 /**
- * Parse json string with `allow_trailing_comma` enabled by default
+ * Parse json string
+ *
+ * @param s - pointer to json formatted string
+ * @param metadatamap - if non-null, will be populated with parse metadata
+ * @param allow_trailing_comma - enabled to allow trailing comma by default
+ *
+ * @return dynamic struct containing the parsed json
  */
 folly::dynamic parseJsonString(
     folly::StringPiece s,
+    folly::json::metadata_map* metadataMap = nullptr,
     bool allow_trailing_comma = true);
 
 /**
@@ -253,5 +259,5 @@ bool ensureDirExistsAndWritable(const std::string& path);
  * Makes sure that a file or directory has the desired permissions.
  */
 bool ensureHasPermission(const std::string& path, mode_t mode);
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

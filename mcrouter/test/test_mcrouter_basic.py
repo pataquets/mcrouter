@@ -1,14 +1,9 @@
-# Copyright (c) 2017, Facebook, Inc.
-# All rights reserved.
+#!/usr/bin/env python3
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 from threading import Thread
 import time
@@ -17,19 +12,22 @@ from mcrouter.test.MCProcess import McrouterClient, Memcached, Mcrouter
 from mcrouter.test.McrouterTestCase import McrouterTestCase
 
 
-class TestMcrouterBasic(McrouterTestCase):
+class TestMcrouterBasicBase(McrouterTestCase):
     config = './mcrouter/test/mcrouter_test_basic_1_1_1.json'
     null_route_config = './mcrouter/test/test_nullroute.json'
     extra_args = []
 
     def setUp(self):
         # The order here corresponds to the order of hosts in the .json
-        self.mc = self.add_server(Memcached())
+        self.mc = self.add_server(self.make_memcached())
 
-    def get_mcrouter(self, additional_args=[]):
-        return self.add_mcrouter(
-            self.config, extra_args=self.extra_args + additional_args)
+    def get_mcrouter(self, additional_args=()):
+        extra_args = self.extra_args[:]
+        extra_args.extend(additional_args)
+        return self.add_mcrouter(self.config, extra_args=extra_args)
 
+
+class TestMcrouterBasic(TestMcrouterBasicBase):
     def test_basic_lease(self):
         mcr = self.get_mcrouter()
 
@@ -66,13 +64,13 @@ class TestMcrouterBasic(McrouterTestCase):
 
         # Stats without args
         res = mcr.issue_command_and_read_all('stats\r\n')
-        self.assertTrue(res)
+        self.assertIsNotNone(res)
         res = mcr.issue_command_and_read_all('stats \r\n')
-        self.assertTrue(res)
+        self.assertIsNotNone(res)
         res = mcr.issue_command_and_read_all('stats\n')
-        self.assertTrue(res)
+        self.assertIsNotNone(res)
         res = mcr.issue_command_and_read_all('stats \n')
-        self.assertTrue(res)
+        self.assertIsNotNone(res)
 
         # Stats with args
         args = ['detailed', 'cmd-error', 'servers', 'suspect_servers', 'count']
@@ -100,7 +98,7 @@ class TestMcrouterBasic(McrouterTestCase):
         def run_client(fail, port):
             mc = McrouterClient(port)
             mc.connect()
-            for i in range(1000):
+            for _ in range(1000):
                 s = mc.stats()
                 if not s:
                     fail[0] = True
@@ -139,11 +137,12 @@ class TestMcrouterBasic(McrouterTestCase):
 
     def test_double_bind(self):
         mcr1 = self.get_mcrouter()
-        time.sleep(1)
         mcr2 = Mcrouter(self.null_route_config, port=mcr1.port)
-
-        time.sleep(2)
         self.assertTrue(mcr1.is_alive())
+        retries = 20
+        while mcr2.is_alive() and retries > 0:
+            retries = retries - 1
+            time.sleep(1)
         self.assertFalse(mcr2.is_alive())
 
     def test_set_exptime(self):
@@ -163,7 +162,15 @@ class TestMcrouterBasic(McrouterTestCase):
 
         # past
         self.assertTrue(mcr.set('key', 'value', exptime=1432250000))
+        # items with past time may a second or two longer
+        time.sleep(2)
         self.assertIsNone(mcr.get('key'))
+
+
+class TestMcrouterBasicTouch(TestMcrouterBasicBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_mock_mc = True
 
     def test_basic_touch(self):
         mcr = self.get_mcrouter()
@@ -190,18 +197,57 @@ class TestMcrouterBasic(McrouterTestCase):
         self.assertEqual(mcr.touch('key', 1432250000), "TOUCHED")
         self.assertIsNone(mcr.get('key'))
 
-class TestMcrouterInvalidRoute(McrouterTestCase):
+
+class TestMcrouterBasicGat(TestMcrouterBasicBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def test_basic_gat(self):
+        mcr = self.get_mcrouter()
+
+        # set ttl to 3 seconds.
+        self.assertTrue(mcr.set('key', 'value', exptime=3))
+
+        # bump ttl to 10 seconds from now.
+        self.assertEqual(mcr.gat(10, 'key'), 'value')
+
+        # sleep for 4 seconds: the item shouldn't have expired
+        time.sleep(4)
+        self.assertEqual(mcr.get('key'), 'value')
+
+    def test_basic_gats(self):
+        mcr = self.get_mcrouter()
+
+        # set ttl to 3 seconds.
+        self.assertTrue(mcr.set('key', 'value', exptime=3))
+
+        # bump ttl to 10 seconds from now.
+        ret = mcr.gats(10, 'key')
+        self.assertEqual(ret['value'], 'value')
+        self.assertTrue(ret['cas'])
+
+        # sleep for 4 seconds: the item shouldn't have expired,
+        # and the cas should succeed
+        time.sleep(4)
+        self.assertEqual(mcr.get('key'), 'value')
+        self.assertTrue(mcr.cas('key', 'value2', ret['cas']))
+
+
+class TestMcrouterInvalidRouteBase(McrouterTestCase):
     config = './mcrouter/test/mcrouter_test_basic_1_1_1.json'
     extra_args = ['--send-invalid-route-to-default']
 
     def setUp(self):
         # The order here corresponds to the order of hosts in the .json
-        self.mc = self.add_server(Memcached())
+        self.mc = self.add_server(self.make_memcached())
 
-    def get_mcrouter(self, additional_args=[]):
-        return self.add_mcrouter(
-            self.config, extra_args=self.extra_args + additional_args)
+    def get_mcrouter(self, additional_args=()):
+        extra_args = self.extra_args[:]
+        extra_args.extend(additional_args)
+        return self.add_mcrouter(self.config, extra_args=extra_args)
 
+
+class TestMcrouterInvalidRoute(TestMcrouterInvalidRouteBase):
     def test_basic_invalid_route(self):
         mcr = self.get_mcrouter()
 
@@ -226,12 +272,24 @@ class TestMcrouterInvalidRoute(McrouterTestCase):
         self.assertEqual(mcr.get("/a/a/key"), "value4")
         self.assertEqual(mcr.get("key"), "value4")
 
+
+class TestMcrouterInvalidRouteAppendPrepend(TestMcrouterInvalidRouteBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_mock_mc = True
+
+    def test_basic_invalid_route(self):
+        mcr = self.get_mcrouter()
+
+        self.assertTrue(mcr.set("key", "value"))
+        self.assertEqual(mcr.get("key"), "value")
+
         self.assertEqual(mcr.append("/*/*/key", "abc"), "STORED")
-        self.assertEqual(mcr.get("/a/a/key"), "value4abc")
-        self.assertEqual(mcr.get("key"), "value4abc")
+        self.assertEqual(mcr.get("/a/a/key"), "valueabc")
+        self.assertEqual(mcr.get("key"), "valueabc")
         self.assertEqual(mcr.prepend("/*/*/key", "123"), "STORED")
-        self.assertEqual(mcr.get("/a/a/key"), "123value4abc")
-        self.assertEqual(mcr.get("key"), "123value4abc")
+        self.assertEqual(mcr.get("/a/a/key"), "123valueabc")
+        self.assertEqual(mcr.get("key"), "123valueabc")
 
 
 class TestMcrouterBasic2(McrouterTestCase):
@@ -243,9 +301,11 @@ class TestMcrouterBasic2(McrouterTestCase):
         self.mc1 = self.add_server(Memcached())
         self.mc2 = self.add_server(Memcached())
 
-    def get_mcrouter(self, additional_args=[]):
+    def get_mcrouter(self, additional_args=()):
+        extra_args = self.extra_args[:]
+        extra_args.extend(additional_args)
         return self.add_mcrouter(
-            self.config, '/a/a/', extra_args=self.extra_args + additional_args)
+            self.config, '/a/a/', extra_args=extra_args)
 
     def test_prefix_routing(self):
         mcr = self.get_mcrouter()
@@ -256,7 +316,8 @@ class TestMcrouterBasic2(McrouterTestCase):
 
         # next set to a remote cluster
         mcr.set("/b/b/cluster2_key_router", "cluster2_router")
-        self.assertEqual(self.mc2.get("cluster2_key_router"), "cluster2_router")
+        self.assertEqual(
+            self.mc2.get("cluster2_key_router"), "cluster2_router")
 
         # try fetching a value from a remote cluster
         self.mc2.set("cluster2_key", "cluster2")
@@ -271,18 +332,6 @@ class TestMcrouterBasic2(McrouterTestCase):
         self.assertFalse(mcr.delete('foobarbizbang2'))
         self.assertTrue(mcr.set('hello', 'world'))
         self.assertEqual(mcr.get('hello'), 'world')
-
-    def test_malformed_umbrella_length(self):
-        mcr = self.get_mcrouter()
-
-        # Send an umbrella request with a malformed length, and check that we
-        # get something back from the server (i.e. that it doesn't crash)
-        mcr.socket.settimeout(10)
-        mcr.socket.send('}}\x00\x01\x00\x00\x00\x00')
-        data = mcr.socket.recv(1024)
-        self.assertTrue(data)
-
-        # else hang
 
     def test_use_big_value(self):
         mcr = self.get_mcrouter(['--big-value-split-threshold=100'])
@@ -309,16 +358,18 @@ class TestMcrouterBasic2(McrouterTestCase):
         self.assertNotIn('logging', reply)
 
 
-class TestBasicAllSync(McrouterTestCase):
+class TestBasicAllSyncBase(McrouterTestCase):
     config = './mcrouter/test/test_basic_all_sync.json'
     extra_args = []
 
     def setUp(self):
         # The order here corresponds to the order of hosts in the .json
-        self.mc1 = self.add_server(Memcached())
-        self.mc2 = self.add_server(Memcached())
-        self.mc3 = self.add_server(Memcached())
+        self.mc1 = self.add_server(self.make_memcached())
+        self.mc2 = self.add_server(self.make_memcached())
+        self.mc3 = self.add_server(self.make_memcached())
 
+
+class TestBasicAllSync(TestBasicAllSyncBase):
     def get_mcrouter(self):
         return self.add_mcrouter(self.config, extra_args=self.extra_args)
 
@@ -337,6 +388,8 @@ class TestBasicAllSync(McrouterTestCase):
         self.assertEqual(self.mc2.get("key"), "value")
         self.assertEqual(self.mc3.get("key"), "value")
         self.assertEqual(mcr.get("key"), "value")
+        self.assertEqual(mcr.gat(0, "key"), "value")
+        self.assertTrue(mcr.gats(0, "key"))
 
         # delete will return True on DELETED
         # will return False on NOT_FOUND
@@ -351,6 +404,15 @@ class TestBasicAllSync(McrouterTestCase):
 
         # the aggregated response should be NOT_FOUND
         self.assertFalse(mcr.delete("key"))
+
+
+class TestBasicAllSyncAppendPrependTouch(TestBasicAllSyncBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_mock_mc = True
+
+    def get_mcrouter(self):
+        return self.add_mcrouter(self.config, extra_args=self.extra_args)
 
     def test_append_prepend_all_sync(self):
         """
@@ -413,6 +475,19 @@ class TestBasicAllSync(McrouterTestCase):
         self.assertEqual(self.mc3.get("key3"), "value")
         self.assertFalse(mcr.get("key3"))
 
+    def test_gat_all_sync(self):
+        mcr = self.get_mcrouter()
+
+        mcr.set("key", "value")
+        self.assertEqual(self.mc1.gat(0, "key"), "value")
+        self.assertEqual(self.mc2.gat(0, "key"), "value")
+        self.assertEqual(self.mc3.gat(0, "key"), "value")
+        self.assertEqual(mcr.gat(-10, "key"), "value")
+        self.assertFalse(mcr.gat(0, "key"))
+        self.assertFalse(mcr.gats(0, "key"))
+        self.assertFalse(mcr.gat(0, "key"))
+        self.assertFalse(mcr.gats(0, "key"))
+
 
 class TestBasicAllFirst(McrouterTestCase):
     config = './mcrouter/test/test_basic_all_first.json'
@@ -436,6 +511,9 @@ class TestBasicAllFirst(McrouterTestCase):
         self.mc1.terminate()
         self.assertTrue(mcr.set("key", "value"))
         self.assertEqual(mcr.get("key"), "value")
+        self.assertEqual(mcr.gat(0, "key"), "value")
+        self.assertTrue(mcr.gats(0, "key"))
+
 
 class TestBasicAllMajority(McrouterTestCase):
     config = './mcrouter/test/test_basic_all_majority.json'
@@ -513,6 +591,7 @@ class TestBasicAllMajority(McrouterTestCase):
         # since it is sorted by awfulness map
         self.assertFalse(mcr.delete("key"))
 
+
 class TestBasicFailover(McrouterTestCase):
     config = './mcrouter/test/test_basic_failover.json'
     extra_args = []
@@ -576,6 +655,7 @@ class TestBasicFailover(McrouterTestCase):
         self.assertTrue(mcr.set("key", "value", exptime=-10))
         self.assertIsNone(mcr.get("key"))
 
+
 class TestBasicFailoverOverride(McrouterTestCase):
     config = './mcrouter/test/test_basic_failover_override.json'
     extra_args = []
@@ -604,6 +684,7 @@ class TestBasicFailoverOverride(McrouterTestCase):
         self.assertTrue(self.mc2.set("key2", "value2"))
         self.assertEqual(mcr.get("key2"), "value2")
         self.assertEqual(mcr.get("key2"), "value2")
+
 
 class TestBasicFailoverLeastFailures(McrouterTestCase):
     """
@@ -640,6 +721,7 @@ class TestBasicFailoverLeastFailures(McrouterTestCase):
         # Now 4 has least errors.
         self.assertEqual(mcr.get("key"), "value")
 
+
 class TestMcrouterBasicL1L2(McrouterTestCase):
     config = './mcrouter/test/test_basic_l1_l2.json'
     config_ncache = './mcrouter/test/test_basic_l1_l2_ncache.json'
@@ -655,7 +737,7 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
 
     def test_l1_l2_get(self):
         """
-        Tests that gets using l1/l2 caching and result upgrading is working
+        Tests that get requests using l1/l2 caching and result upgrading is working
         """
         mcr = self.get_mcrouter(self.config)
 
@@ -668,6 +750,8 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
 
         # perform a get and check the response
         self.assertTrue(mcr.get("key1"), "value1")
+        self.assertTrue(mcr.gat(0, "key1"), "value1")
+        self.assertTrue(mcr.gats(0, "key1"))
 
         # set key only in l2 pool
         self.l2.set("key2", "value2")
@@ -676,6 +760,8 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
 
         # perform a get and check the response
         self.assertEqual(mcr.get("key2"), "value2")
+        self.assertEqual(mcr.gat(0, "key2"), "value2")
+        self.assertTrue(mcr.gats(0, "key2"))
 
         # perform the same get until it gets upgraded to l1
         # if the test gets stuck in an infinite loop here upgrading results is
@@ -699,6 +785,8 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
         self.l1.terminate()
         # we should still be able to get from l2
         self.assertEqual(mcr.get("key1"), "value1")
+        self.assertEqual(mcr.gat(0, "key1"), "value1")
+        self.assertTrue(mcr.gats(0, "key1"))
 
     def test_l1_l2_get_l2_down(self):
         """
@@ -716,11 +804,15 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
         self.l2.terminate()
         # we should still be able to get from l1
         self.assertTrue(mcr.get("key1"), "value1")
+        self.assertTrue(mcr.gat(0, "key1"), "value1")
+        self.assertTrue(mcr.gats(0, "key1"))
 
         # terminate l1 pool as well
         self.l1.terminate()
         # we should get nothing back
         self.assertFalse(mcr.get("key1"))
+        self.assertFalse(mcr.gat(0, "key1"))
+        self.assertFalse(mcr.gats(0, "key1"))
 
     def test_l1_l2_get_ncache(self):
         mcr = self.get_mcrouter(self.config_ncache)
@@ -742,6 +834,68 @@ class TestMcrouterBasicL1L2(McrouterTestCase):
 
         self.assertEqual(mcr.get("key1"), "value1")
         self.assertEqual(self.l1.get("key1"), "value1")
+
+    def test_l1_l2_gat_ncache(self):
+        mcr = self.get_mcrouter(self.config_ncache)
+
+        # get a non-existent key
+        self.assertFalse(mcr.gat(0, "key1"))
+
+        time.sleep(1)
+
+        self.assertEqual(self.l1.gat(0, "key1"), "ncache")
+        self.assertTrue(self.l2.set("key1", "value1"))
+
+        self.assertFalse(mcr.gat(0, "key1"))
+        self.assertFalse(mcr.gat(0, "key1"))
+        self.assertFalse(mcr.gat(0, "key1"))
+        self.assertFalse(mcr.gats(0, "key1"))
+        self.assertFalse(mcr.gats(0, "key1"))
+        time.sleep(1)
+
+        self.assertEqual(mcr.gat(0, "key1"), "value1")
+        self.assertEqual(self.l1.gat(0, "key1"), "value1")
+
+
+class TestMcrouterBasicL1MultipleL2SizeSplit(McrouterTestCase):
+
+    config_multil2 = './mcrouter/test/test_basic_l1_multiple_l2_sizesplit.json'
+    extra_args = []
+    MC_MSG_FLAG_SIZE_SPLIT = 0x20
+
+    def setUp(self):
+        # The order here corresponds to the order of hosts in the .json
+        self.l1 = self.add_server(Memcached())
+        self.l2_1 = self.add_server(Memcached())
+        self.l2_2 = self.add_server(Memcached())
+        self.l2_3 = self.add_server(Memcached())
+
+    def get_mcrouter(self, config):
+        return self.add_mcrouter(config, extra_args=self.extra_args)
+
+    def test_l1_multiple_l2_sizesplit_get_after_leaseset(self):
+        """
+        Basic functionality tests. Simple Get after Set-lease should work
+        in a setup with single L1 and multiple L2's.
+        """
+        mcr = self.get_mcrouter(self.config_multil2)
+
+        # Issue leaseGet with a non-existing key, we should get a valid lease token
+        result = mcr.leaseGet("key1")
+        real_token = result["token"]
+        self.assertNotEqual(real_token, None)
+
+        # Issue leaseSet with a very long value, the key should end up split
+        long_value = "foo" * 200
+        result["value"] = long_value
+        self.assertTrue(mcr.leaseSet("key1", result))
+
+        # Verify that sentinel flag is set in L1
+        l1res = self.l1.get("key1", return_all_info=True)
+        self.assertTrue(l1res["flags"] & self.MC_MSG_FLAG_SIZE_SPLIT)
+
+        # Issue simple Get. It should ALWAYS get the original long value.
+        self.assertEqual(mcr.get("key1"), long_value)
 
 
 class TestMcrouterBasicL1L2SizeSplit(McrouterTestCase):
@@ -835,6 +989,142 @@ class TestMcrouterBasicL1L2SizeSplit(McrouterTestCase):
         self.assertEqual(self.l1.get("key"), "")
         self.assertFalse(mcr.get("key"))
 
+    def test_l1_l2_cas(self):
+        """
+        Tests that gets requests using l1/l2 caching and result upgrading is working
+        """
+        mcr = self.get_mcrouter(self.config)
+
+        # get a non-existent key
+        self.assertFalse(mcr.get("key"))
+
+        # set small key which should go to L1
+        mcr.set("key", "value1")
+
+        # Do a gets on key
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+
+        # Get cas token
+        cas = res['cas']
+        self.assertTrue(mcr.cas('key', 'value2', cas))
+
+        # Do another gets and check that cas token has changed
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["value"], "value2")
+        self.assertNotEqual(cas, res["cas"])
+
+        # Check item on L1 is not a sentinel
+        l1res = self.l1.get("key", return_all_info=True)
+        self.assertIsNotNone(l1res)
+        self.assertFalse(l1res["flags"] & self.MC_MSG_FLAG_SIZE_SPLIT)
+
+    def test_l1_l2_cas_large(self):
+        """
+        Tests that large gets requests using l1/l2 caching / result upgrading.
+        """
+        mcr = self.get_mcrouter(self.config)
+
+        # get a non-existent key
+        self.assertFalse(mcr.get("key1"))
+
+        # set large key which should go to L2
+        value = "foo" * 200
+        mcr.set("key", value)
+
+        # Do a gets on key and check its a hit
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+
+        # Do a cas on item and check successful
+        cas = res['cas']
+        self.assertTrue(mcr.cas('key', 'value_modified', cas))
+
+        # Do another gets and check that cas token has changed
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+        self.assertNotEqual(cas, res["cas"])
+
+        # Check item on L1 is not sentinel given that CAS always sets to L1
+        l1res = self.l1.get("key", return_all_info=True)
+        self.assertIsNotNone(l1res)
+        self.assertFalse(l1res["flags"] & self.MC_MSG_FLAG_SIZE_SPLIT)
+        self.assertEqual(l1res["value"], "value_modified")
+
+    def test_l1_l2_cas_large_fail(self):
+        """
+        Tests that subsequent cas using same token fail in L1/L2 caching fail
+        """
+        mcr = self.get_mcrouter(self.config)
+
+        # get a non-existent key
+        self.assertFalse(mcr.get("key1"))
+
+        # set large key which should go to L2
+        value = "foo" * 200
+        mcr.set("key", value)
+
+        # Do a gets on key and check its a hit
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+
+        # Do a cas on item and check successful
+        cas = res['cas']
+        self.assertTrue(mcr.cas('key', 'value_modified', cas))
+
+        # Do another gets and check that cas token has changed
+        res = mcr.gets("key")
+        self.assertIsNotNone(res)
+        self.assertNotEqual(cas, res["cas"])
+
+        # Do another cas using the same token and check it fails
+        self.assertFalse(mcr.cas('key', 'value_modified2', cas))
+
+    def test_l1l2_l1_hit_l2_lookup_fail(self):
+        """
+        Basic functionality test in L1L2Split
+        Verify that L1 sentinel is deleted whenever there is a L1 hit but a L2 lookup failure.
+        """
+        mcr = self.get_mcrouter(self.config)
+
+        # Issue leaseGet with a non-existing key, we should get a valid lease token
+        result = mcr.leaseGet("key1")
+        token = result["token"]
+        self.assertNotEqual(token, None)
+
+        # Issue leaseSet with a very long value, the key should end up split
+        long_value = "foo" * 20
+        result["value"] = long_value
+        self.assertTrue(mcr.leaseSet("key1", result))
+
+        # Verify that sentinel flag is set in L1
+        l1res = self.l1.get("key1", return_all_info=True)
+        self.assertTrue(l1res["flags"] & self.MC_MSG_FLAG_SIZE_SPLIT)
+
+        # Simulate a TKO on L2
+        self.l2.terminate()
+
+        # Subsequent Get with same key should fail. Key should no longer be found in L1
+        self.assertNotEqual(mcr.get("key1"), long_value)
+        self.assertFalse(self.l1.get("key1"))
+
+        # Subsequent attempts to refill should go to L1. Verify lease-get/refill/get works
+        # with no errors
+        result = mcr.leaseGet("key1")
+        token = result["token"]
+        self.assertNotEqual(token, None)
+
+        long_value = "foo" * 20
+        result["value"] = long_value
+        self.assertTrue(mcr.leaseSet("key1", result))
+
+        self.assertEqual(mcr.get("key1"), long_value)
+
+        # Sentinel should not be found in L1
+        l1res = self.l1.get("key1", return_all_info=True)
+        self.assertFalse(l1res["flags"] & self.MC_MSG_FLAG_SIZE_SPLIT)
+
 
 class TestMcrouterPortOverride(McrouterTestCase):
     config = './mcrouter/test/mcrouter_test_portoverride.json'
@@ -846,3 +1136,21 @@ class TestMcrouterPortOverride(McrouterTestCase):
         mcr = self.add_mcrouter(self.config, extra_args=extra_args)
         self.assertTrue(mcr.set('key', 'value'))
         self.assertEqual(mcr.get('key'), 'value')
+
+
+class TestMcrouterWithRetries(McrouterTestCase):
+    valid_config_with_retries = \
+        "./mcrouter/test/test_basic_l1_l2_sizesplit_retry_valid.json"
+    invalid_config_with_retries = \
+        "./mcrouter/test/test_basic_l1_l2_sizesplit_retry_invalid.json"
+    extra_args = ["--validate-config=run"]
+
+    def test_valid_retries(self):
+        mcr = self.add_mcrouter(self.valid_config_with_retries,
+                                extra_args=self.extra_args)
+        self.assertTrue(self._is_mcrouter_running(mcr))
+
+    def test_invalid_retries(self):
+        mcr = self.add_mcrouter(self.invalid_config_with_retries,
+                                extra_args=self.extra_args)
+        self.assertFalse(self._is_mcrouter_running(mcr))

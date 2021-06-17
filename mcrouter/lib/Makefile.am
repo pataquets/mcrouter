@@ -1,10 +1,17 @@
-SUBDIRS = . config fbi network test
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+SUBDIRS = carbon network/gen . config fbi network/test test
 
 noinst_LIBRARIES = libmcrouter.a
 
 libmcrouter_a_SOURCES = \
   AuxiliaryCPUThreadPool.h \
   AuxiliaryCPUThreadPool.cpp \
+  AuxiliaryIOThreadPool.h \
+  AuxiliaryIOThreadPool.cpp \
   CacheClientStats.h \
   Ch3HashFunc.h \
   Clocks.cpp \
@@ -14,8 +21,10 @@ libmcrouter_a_SOURCES = \
   CompressionCodecManager.cpp \
   CompressionCodecManager.h \
   Crc32HashFunc.h \
-  FailoverErrorsSettings.cpp \
+  FailoverErrorsSettingsBase.cpp \
+  FailoverErrorsSettingsBase.h \
   FailoverErrorsSettings.h \
+  HashUtil.h \
   IOBufUtil.cpp \
   IOBufUtil.h \
   IovecCursor-inl.h \
@@ -29,15 +38,14 @@ libmcrouter_a_SOURCES = \
   Lz4ImmutableCompressionCodec.h \
   MessageQueue.cpp \
   MessageQueue.h \
-  McOpList.h \
-  McOperation.h \
-  McOperationTraits.h \
   McResUtil.h \
   Operation.h \
-  OperationTraits.h \
+  PoolContext.h \
   Ref.h \
   RendezvousHashFunc.cpp \
   RendezvousHashFunc.h \
+  RendezvousHashHelper.cpp \
+  RendezvousHashHelper.h \
   Reply.h \
   RouteHandleTraverser.h \
   SelectionRouteFactory.h \
@@ -45,9 +53,16 @@ libmcrouter_a_SOURCES = \
   StatsReply.h \
   WeightedCh3HashFunc.cpp \
   WeightedCh3HashFunc.h \
+  WeightedCh4HashFunc.cpp \
+  WeightedCh4HashFunc.h \
+  WeightedChHashFuncBase.cpp \
+  WeightedChHashFuncBase.h \
+  WeightedRendezvousHashFunc.cpp \
+  WeightedRendezvousHashFunc.h \
   ZstdCompressionCodec.cpp \
   ZstdCompressionCodec.h \
   carbon/Fields.h \
+  carbon/FailoverUtil.h \
   carbon/CarbonQueueAppender.cpp \
   carbon/CarbonQueueAppender.h \
   carbon/CarbonProtocolCommon.h \
@@ -61,13 +76,25 @@ libmcrouter_a_SOURCES = \
   carbon/ReplyCommon.h \
   carbon/RequestCommon.h \
   carbon/RequestReplyUtil.h \
+  carbon/Result.cpp \
   carbon/Result.h \
+  carbon/RoutingGroups.h \
   carbon/SerializationTraits.h \
   carbon/Stats.h \
   carbon/TypeList-inl.h \
   carbon/TypeList.h \
   carbon/Util.h \
   carbon/Variant.h \
+  carbon/gen-cpp2/carbon_result_types.cpp \
+  carbon/gen-cpp2/carbon_result_types.h \
+  carbon/gen-cpp2/carbon_result_types.tcc \
+  carbon/gen-cpp2/carbon_result_data.cpp \
+  carbon/gen-cpp2/carbon_result_data.h \
+  carbon/gen-cpp2/carbon_types.cpp \
+  carbon/gen-cpp2/carbon_types.h \
+  carbon/gen-cpp2/carbon_types.tcc \
+  carbon/gen-cpp2/carbon_data.cpp \
+  carbon/gen-cpp2/carbon_data.h \
   config/ConfigPreprocessor.cpp \
   config/ConfigPreprocessor.h \
   config/ImportResolverIf.h \
@@ -85,7 +112,7 @@ libmcrouter_a_SOURCES = \
   debug/Fifo.h \
   debug/FifoManager.cpp \
   debug/FifoManager.h \
-  fbi/counting_sem.c \
+  fbi/counting_sem.cpp \
   fbi/counting_sem.h \
   fbi/cpp/FuncGenerator.h \
   fbi/cpp/LogFailure.cpp \
@@ -98,25 +125,21 @@ libmcrouter_a_SOURCES = \
   fbi/cpp/globals.h \
   fbi/cpp/ParsingUtil.cpp \
   fbi/cpp/ParsingUtil.h \
-  fbi/cpp/sfrlock.h \
   fbi/cpp/util.cpp \
   fbi/cpp/util.h \
   fbi/decls.h \
+  fbi/WeightedFurcHash.cpp \
+  fbi/WeightedFurcHash.h \
   fbi/hash.c \
   fbi/hash.h \
   fbi/network.c \
   fbi/network.h \
   fbi/queue.h \
-  fbi/sfrlock.c \
-  fbi/sfrlock.h \
   fbi/time.h \
   fbi/util.h \
   mc/msg.cpp \
   mc/msg.h \
   mc/protocol.h \
-  mc/umbrella.c \
-  mc/umbrella.h \
-  mc/umbrella_conv.h \
   network/AccessPoint.cpp \
   network/AccessPoint.h \
   network/AsciiSerialized-inl.h \
@@ -132,17 +155,20 @@ libmcrouter_a_SOURCES = \
   network/AsyncMcServerWorker.cpp \
   network/AsyncMcServerWorker.h \
   network/AsyncMcServerWorkerOptions.h \
+  network/AsyncTlsToPlaintextSocket.cpp \
+  network/AsyncTlsToPlaintextSocket.h \
   network/CarbonMessageDispatcher.h \
   network/CarbonMessageList.h \
   network/CarbonMessageTraits.h \
   network/CarbonRequestHandler.h \
   network/CaretHeader.h \
+  network/CaretProtocol.cpp \
+  network/CaretProtocol.h \
   network/CaretSerializedMessage-inl.h \
   network/CaretSerializedMessage.h \
   network/ClientMcParser-inl.h \
   network/ClientMcParser.h \
-  network/CongestionController.cpp \
-  network/CongestionController.h \
+  network/ConnectionDownReason.h \
   network/ConnectionOptions.h \
   network/ConnectionTracker.cpp \
   network/ConnectionTracker.h \
@@ -150,10 +176,33 @@ libmcrouter_a_SOURCES = \
   network/CpuController.h \
   network/gen/CommonMessages-inl.h \
   network/gen/CommonMessages.cpp \
+  network/gen/CommonMessagesThrift.cpp \
   network/gen/CommonMessages.h \
   network/gen/MemcacheMessages-inl.h \
   network/gen/MemcacheMessages.cpp \
+  network/gen/MemcacheMessagesThrift.cpp \
   network/gen/MemcacheMessages.h \
+  network/gen/gen-cpp2/Common_types.cpp \
+  network/gen/gen-cpp2/Common_types.h \
+  network/gen/gen-cpp2/Common_types.tcc \
+  network/gen/gen-cpp2/Common_data.cpp \
+  network/gen/gen-cpp2/Common_data.h \
+  network/gen/gen-cpp2/MemcacheAsyncClient.cpp \
+  network/gen/gen-cpp2/MemcacheAsyncClient.h \
+  network/gen/gen-cpp2/MemcacheService_constants.cpp \
+  network/gen/gen-cpp2/MemcacheService_constants.h \
+  network/gen/gen-cpp2/MemcacheService_types.cpp \
+  network/gen/gen-cpp2/MemcacheService_types.h \
+  network/gen/gen-cpp2/MemcacheService_types.tcc \
+  network/gen/gen-cpp2/MemcacheService_data.cpp \
+  network/gen/gen-cpp2/MemcacheService_data.h \
+  network/gen/gen-cpp2/Memcache_types.cpp \
+  network/gen/gen-cpp2/Memcache_types.h \
+  network/gen/gen-cpp2/Memcache_types.tcc \
+  network/gen/gen-cpp2/Memcache_data.cpp \
+  network/gen/gen-cpp2/Memcache_data.h \
+  network/FizzContextProvider.cpp \
+  network/FizzContextProvider.h \
   network/McAsciiParser-gen.cpp \
   network/McAsciiParser-inl.h \
   network/McAsciiParser.cpp \
@@ -170,21 +219,31 @@ libmcrouter_a_SOURCES = \
   network/McServerRequestContext.h \
   network/McServerSession.cpp \
   network/McServerSession.h \
-  network/McServerSSLUtil.cpp \
-  network/McServerSSLUtil.h \
-  network/MemcacheMessageHelpers.h \
-  network/MemoryController.cpp \
-  network/MemoryController.h \
+  network/McServerThriftRequestContext.cpp \
+  network/McServerThriftRequestContext.h \
+  network/McSSLUtil.cpp \
+  network/McSSLUtil.h \
+  network/MessageHelpers.h \
   network/MultiOpParent.cpp \
   network/MultiOpParent.h \
+  network/Qos.cpp \
+  network/Qos.h \
+  network/SecurityOptions.cpp \
+  network/SecurityOptions.h \
   network/ServerLoad.cpp \
   network/ServerLoad.h \
   network/ServerMcParser-inl.h \
   network/ServerMcParser.h \
+  network/SocketConnector.cpp \
+  network/SocketConnector.h \
+  network/SocketUtil.cpp \
+  network/SocketUtil.h \
   network/ThreadLocalSSLContextProvider.cpp \
   network/ThreadLocalSSLContextProvider.h \
-  network/UmbrellaProtocol.cpp \
-  network/UmbrellaProtocol.h \
+  network/ThriftTransport-inl.h \
+  network/ThriftTransport.cpp \
+  network/ThriftTransport.h \
+  network/Transport.h \
   network/UniqueIntrusiveList.h \
   network/WriteBuffer.cpp \
   network/WriteBuffer.h \
@@ -193,6 +252,8 @@ libmcrouter_a_SOURCES = \
   routes/AllInitialRoute.h \
   routes/AllMajorityRoute.h \
   routes/AllSyncRoute.h \
+  routes/CarbonLookasideRoute.h \
+  routes/LoadBalancerRoute.h \
   routes/LoggingRoute.h \
   routes/MigrateRoute.h \
   routes/NullRoute.h \
@@ -206,6 +267,6 @@ libmcrouter_a_CFLAGS = -I$(top_srcdir)/..
 check_LTLIBRARIES = libtestmain.la
 check_PROGRAMS =
 
-libtestmain_la_CPPFLAGS = -Igtest/include -Igtest
-libtestmain_la_SOURCES = TestMain.cpp gtest/src/gtest-all.cc
-libtestmain_la_LIBADD = -lfolly -lfollyinit
+libtestmain_la_CPPFLAGS = $(GTEST_CFLAGS)
+libtestmain_la_SOURCES = TestMain.cpp
+libtestmain_la_LIBADD = -lfolly $(GTEST_LIBS)

@@ -1,18 +1,15 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include "mcrouter/McrouterFiberContext.h"
 #include "mcrouter/ProxyBase.h"
 #include "mcrouter/ProxyRequestContextTyped.h"
-#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/config/RouteHandleBuilder.h"
@@ -38,8 +35,10 @@ class DevNullRoute {
   }
 
   template <class Request>
-  void traverse(const Request&, const RouteHandleTraverser<RouteHandleIf>&)
-      const {}
+  bool traverse(const Request&, const RouteHandleTraverser<RouteHandleIf>&)
+      const {
+    return false;
+  }
 
   template <class Request>
   static ReplyT<Request> route(const Request& req) {
@@ -56,7 +55,7 @@ typename RouterInfo::RouteHandlePtr makeDevNullRoute() {
   return makeRouteHandleWithInfo<RouterInfo, DevNullRoute>();
 }
 
-} // detail
+} // namespace detail
 
 template <class RouterInfo>
 typename RouterInfo::RouteHandlePtr makeDevNullRoute(
@@ -64,6 +63,6 @@ typename RouterInfo::RouteHandlePtr makeDevNullRoute(
     const folly::dynamic&) {
   return detail::makeDevNullRoute<RouterInfo>();
 }
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <array>
@@ -82,16 +80,19 @@ class Stats {
         return;
       }
       constexpr auto statGroup = StatsConfig::template getStatGroup<Request>();
-      ++sumStats_[statGroup];
+      auto& stat = sumStats_[statGroup];
+      stat.store(
+          stat.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
     }
 
     folly::dynamic dump(bool filterZeroes) const {
       folly::dynamic rv(folly::dynamic::object());
       for (size_t statGroup = 0; statGroup < kNumStats; ++statGroup) {
-        if (filterZeroes && sumStats_[statGroup] == 0) {
+        auto sumStat = sumStats_[statGroup].load(std::memory_order_relaxed);
+        if (filterZeroes && sumStat == 0) {
           continue;
         }
-        rv[kStatNames[statGroup]] = sumStats_[statGroup];
+        rv[kStatNames[statGroup]] = sumStat;
       }
       return rv;
     }
@@ -104,7 +105,7 @@ class Stats {
     static constexpr std::array<folly::StringPiece, kNumStats> kStatNames =
         StatsConfig::sumStatNames;
 
-    std::array<uint64_t, kNumStats> sumStats_{};
+    std::array<std::atomic<uint64_t>, kNumStats> sumStats_{};
   };
 
   class RateStats {
@@ -121,7 +122,9 @@ class Stats {
       constexpr auto statGroup = StatsConfig::template getStatGroup<Request>();
       const size_t baseOffset =
           static_cast<size_t>(statType) * kNumRequestGroups;
-      ++currentStats_[baseOffset + statGroup];
+      auto& stat = currentStats_[baseOffset + statGroup];
+      stat.store(
+          stat.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
     }
 
     folly::dynamic dump(bool filterZeroes) const {
@@ -146,9 +149,11 @@ class Stats {
 
       for (size_t statIndex = 0; statIndex < kNumStats; ++statIndex) {
         accumulatedStats_[statIndex] -= rateStats_[statIndex][binIndex_];
-        rateStats_[statIndex][binIndex_] = currentStats_[statIndex];
-        accumulatedStats_[statIndex] += currentStats_[statIndex];
-        currentStats_[statIndex] = 0;
+        auto currentStat =
+            currentStats_[statIndex].load(std::memory_order_relaxed);
+        rateStats_[statIndex][binIndex_] = currentStat;
+        accumulatedStats_[statIndex] += currentStat;
+        currentStats_[statIndex].store(0, std::memory_order_relaxed);
       }
     }
 
@@ -164,7 +169,7 @@ class Stats {
 
     size_t binIndex_{0};
     size_t numBinsUsed_{0};
-    std::array<uint64_t, kNumStats> currentStats_{};
+    std::array<std::atomic<uint64_t>, kNumStats> currentStats_{};
     std::array<uint64_t, kNumStats> accumulatedStats_{};
     std::array<std::array<uint64_t, kNumBins>, kNumStats> rateStats_{};
   };
@@ -182,4 +187,4 @@ constexpr std::
     array<folly::StringPiece, Stats<RouterInfo>::RateStats::kNumStats>
         Stats<RouterInfo>::RateStats::kStatNames;
 
-} // carbon
+} // namespace carbon

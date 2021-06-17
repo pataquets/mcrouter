@@ -1,45 +1,23 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
+#pragma once
+
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/fbi/cpp/LogFailure.h"
 
 namespace facebook {
 namespace memcache {
 
-namespace {
-#ifndef LIBMC_FBTRACE_DISABLE
-
-template <class Request>
-typename std::enable_if<
-    RequestHasFbTraceInfo<Request>::value,
-    const mc_fbtrace_info_s*>::type inline getFbTraceInfo(const Request&
-                                                              request) {
-  return request.fbtraceInfo();
-}
-
-template <class Request>
-typename std::enable_if<
-    !RequestHasFbTraceInfo<Request>::value,
-    const mc_fbtrace_info_s*>::type inline getFbTraceInfo(const Request&) {
-  return nullptr;
-}
-
-#endif
-} // anonymous
-
 template <class Reply>
 void McClientRequestContextBase::reply(Reply&& r) {
   assert(
       state() == ReqState::PENDING_REPLY_QUEUE ||
-      state() == ReqState::WRITE_QUEUE ||
-      state() == ReqState::WRITE_QUEUE_CANCELED);
+      state() == ReqState::WRITE_QUEUE);
   if (replyType_ != typeid(Reply)) {
     LOG_FAILURE(
         "AsyncMcClient",
@@ -50,14 +28,14 @@ void McClientRequestContextBase::reply(Reply&& r) {
         typeid(Reply).name());
 
     replyErrorImpl(
-        mc_res_local_error, "Attempt to forward a reply of wrong type.");
+        carbon::Result::LOCAL_ERROR,
+        "Attempt to forward a reply of wrong type.");
     return;
   }
 
   auto* storage = reinterpret_cast<folly::Optional<Reply>*>(replyStorage_);
   assert(!storage->hasValue());
   storage->emplace(std::move(r));
-  sendTraceOnReply();
 }
 
 template <class Request>
@@ -80,7 +58,7 @@ McClientRequestContextBase::McClientRequestContextBase(
 
 template <class Request>
 void McClientRequestContext<Request>::replyErrorImpl(
-    mc_res_t result,
+    carbon::Result result,
     folly::StringPiece errorMessage) {
   assert(!replyStorage_.hasValue());
   replyStorage_.assign(
@@ -107,31 +85,21 @@ McClientRequestContext<Request>::waitForReply(
       baton_.wait();
       assert(state() == ReqState::COMPLETE);
       return std::move(replyStorage_.value());
-    case ReqState::WRITE_QUEUE:
-      // Request is being written into socket, we need to wait for it to be
-      // completely written, then reply with timeout.
-      setState(ReqState::WRITE_QUEUE_CANCELED);
-      baton_.reset();
-      baton_.wait();
-      assert(state() == ReqState::COMPLETE || state() == ReqState::NONE);
-      // It is still possible that we'll receive a reply while waiting.
-      if (state() == ReqState::COMPLETE) {
-        return std::move(replyStorage_.value());
-      }
-      return Reply(mc_res_timeout);
     case ReqState::PENDING_QUEUE:
       // Request wasn't sent to the network yet, reply with timeout.
       queue_.removePending(*this);
-      return Reply(mc_res_timeout);
+      return createReply<Request>(
+          ErrorReply, carbon::Result::TIMEOUT, "Client queue timeout");
     case ReqState::PENDING_REPLY_QUEUE:
       // Request was sent to the network, but wasn't replied yet,
       // reply with timeout.
       queue_.removePendingReply(*this);
-      return Reply(mc_res_timeout);
+      return createReply<Request>(
+          ErrorReply, carbon::Result::TIMEOUT, "Reply timeout");
     case ReqState::COMPLETE:
       assert(replyStorage_.hasValue());
       return std::move(replyStorage_.value());
-    case ReqState::WRITE_QUEUE_CANCELED:
+    case ReqState::WRITE_QUEUE:
     case ReqState::NONE:
       LOG_FAILURE(
           "AsyncMcClient",
@@ -139,7 +107,7 @@ McClientRequestContext<Request>::waitForReply(
           "Unexpected state of request: {}!",
           static_cast<uint64_t>(state()));
   }
-  return Reply(mc_res_local_error);
+  return Reply(carbon::Result::LOCAL_ERROR);
 }
 
 template <class Request>
@@ -159,26 +127,14 @@ McClientRequestContext<Request>::McClientRequestContext(
           queue,
           std::move(func),
           onStateChange,
-          supportedCodecs)
-#ifndef LIBMC_FBTRACE_DISABLE
-      ,
-      fbtraceInfo_(getFbTraceInfo(request))
-#endif
-{
-}
-
-template <class Request>
-void McClientRequestContext<Request>::sendTraceOnReply() {
-#ifndef LIBMC_FBTRACE_DISABLE
-  fbTraceOnReceive(fbtraceInfo_, replyStorage_.value().result());
-#endif
-}
+          supportedCodecs),
+      requestTraceContext_(request.traceContext()) {}
 
 template <class Reply>
 void McClientRequestContextQueue::reply(
     uint64_t id,
     Reply&& r,
-    ReplyStatsContext replyStatsContext) {
+    RpcStatsContext rpcStatsContext) {
   // Get the context and erase it from the queue and map.
   McClientRequestContextBase* ctx{nullptr};
   if (outOfOrder_) {
@@ -202,7 +158,7 @@ void McClientRequestContextQueue::reply(
 
       auto oldState = ctx->state();
       ctx->reply(std::move(r));
-      ctx->setReplyStatsContext(replyStatsContext);
+      ctx->setRpcStatsContext(rpcStatsContext);
       ctx->setState(State::COMPLETE);
 
       if (oldState == State::PENDING_REPLY_QUEUE) {
@@ -230,7 +186,7 @@ void McClientRequestContextQueue::reply(
 
     if (ctx) {
       ctx->reply(std::move(r));
-      ctx->setReplyStatsContext(replyStatsContext);
+      ctx->setRpcStatsContext(rpcStatsContext);
       if (ctx->state() == State::PENDING_REPLY_QUEUE) {
         ctx->setState(State::COMPLETE);
         ctx->baton_.post();
@@ -242,5 +198,5 @@ void McClientRequestContextQueue::reply(
     }
   }
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

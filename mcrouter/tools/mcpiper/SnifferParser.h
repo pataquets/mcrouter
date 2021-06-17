@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <chrono>
@@ -15,7 +13,7 @@
 #include <folly/IntrusiveList.h>
 #include <folly/SocketAddress.h>
 
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/tools/mcpiper/ClientServerMcParser.h"
 
 namespace facebook {
@@ -32,7 +30,7 @@ namespace memcache {
 template <class Callback>
 class SnifferParserBase {
  public:
-  explicit SnifferParserBase(Callback& cb) noexcept : callback_(cb){}
+  explicit SnifferParserBase(Callback& cb) noexcept : callback_(cb) {}
   virtual ~SnifferParserBase() = default;
 
   virtual void
@@ -97,10 +95,8 @@ class SnifferParserBase {
   template <class Request>
   void requestReady(uint64_t msgId, Request&& request);
   template <class Reply>
-  void replyReady(
-      uint64_t msgId,
-      Reply&& reply,
-      ReplyStatsContext replyStatsContext);
+  void
+  replyReady(uint64_t msgId, Reply&& reply, RpcStatsContext rpcStatsContext);
 
   void evictOldItems(TimePoint now);
 
@@ -132,7 +128,7 @@ class SnifferParser : public SnifferParserBase<Callback> {
   // The parser itself.
   ClientServerMcParser<SnifferParserBase<Callback>, RequestList> parser_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook
 
 #include "SnifferParser-inl.h"

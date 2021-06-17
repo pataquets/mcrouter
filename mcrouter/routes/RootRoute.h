@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -36,31 +34,36 @@ class RootRoute {
   }
 
   RootRoute(
-      ProxyBase* proxy,
+      ProxyBase& proxy,
       const RouteSelectorMap<RouteHandleIf>& routeSelectors)
-      : opts_(proxy->getRouterOptions()),
+      : opts_(proxy.getRouterOptions()),
         rhMap_(
             routeSelectors,
             opts_.default_route,
             opts_.send_invalid_route_to_default) {}
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
     const auto* rhPtr = rhMap_.getTargetsForKeyFast(
-        req.key().routingPrefix(), req.key().routingKey());
+        req.key_ref()->routingPrefix(), req.key_ref()->routingKey());
     if (LIKELY(rhPtr != nullptr)) {
       for (const auto& rh : *rhPtr) {
-        t(*rh, req);
+        if (t(*rh, req)) {
+          return true;
+        }
       }
-      return;
+      return false;
     }
     auto v = rhMap_.getTargetsForKeySlow(
-        req.key().routingPrefix(), req.key().routingKey());
+        req.key_ref()->routingPrefix(), req.key_ref()->routingKey());
     for (const auto& rh : v) {
-      t(*rh, req);
+      if (t(*rh, req)) {
+        return true;
+      }
     }
+    return false;
   }
 
   template <class Request>
@@ -71,17 +74,17 @@ class RootRoute {
 
        This is a good default for /star/star/ requests. */
     const auto* rhPtr = rhMap_.getTargetsForKeyFast(
-        req.key().routingPrefix(), req.key().routingKey());
+        req.key_ref()->routingPrefix(), req.key_ref()->routingKey());
 
     auto reply = UNLIKELY(rhPtr == nullptr)
         ? routeImpl(
               rhMap_.getTargetsForKeySlow(
-                  req.key().routingPrefix(), req.key().routingKey()),
+                  req.key_ref()->routingPrefix(), req.key_ref()->routingKey()),
               req)
         : routeImpl(*rhPtr, req);
 
-    if (isErrorResult(reply.result()) && opts_.group_remote_errors) {
-      reply = ReplyT<Request>(mc_res_remote_error);
+    if (isErrorResult(*reply.result_ref()) && opts_.group_remote_errors) {
+      reply = ReplyT<Request>(carbon::Result::REMOTE_ERROR);
     }
 
     return reply;
@@ -97,18 +100,18 @@ class RootRoute {
       const Request& req,
       carbon::GetLikeT<Request> = 0) const {
     auto reply = doRoute(rh, req);
-    if (isErrorResult(reply.result()) && opts_.miss_on_get_errors &&
+    if (isErrorResult(*reply.result_ref()) && opts_.miss_on_get_errors &&
         !rh.empty()) {
       /* rh.empty() case: for backwards compatibility,
          always surface invalid routing errors */
-      auto originalResult = reply.result();
+      auto originalResult = *reply.result_ref();
       reply = createReply(DefaultReply, req);
       carbon::setMessageIfPresent(
           reply,
           folly::to<std::string>(
               "Error reply transformed into miss due to miss_on_get_errors. "
               "Original reply result: ",
-              mc_res_to_string(originalResult)));
+              carbon::resultToString(originalResult)));
     }
     return reply;
   }
@@ -120,7 +123,8 @@ class RootRoute {
       carbon::ArithmeticLikeT<Request> = 0) const {
     auto reply = opts_.allow_only_gets ? createReply(DefaultReply, req)
                                        : doRoute(rh, req);
-    if (isErrorResult(reply.result())) {
+    if (isErrorResult(*reply.result_ref()) &&
+        !opts_.disable_miss_on_arith_errors) {
       reply = createReply(DefaultReply, req);
     }
     return reply;
@@ -145,7 +149,7 @@ class RootRoute {
       const Request& req) const {
     if (!rh.empty()) {
       if (rh.size() > 1) {
-        auto reqCopy = std::make_shared<Request>(req);
+        auto reqCopy = std::make_shared<const Request>(req);
         for (size_t i = 1; i < rh.size(); ++i) {
           auto r = rh[i];
           folly::fibers::addTask([r, reqCopy]() { r->route(*reqCopy); });
@@ -156,6 +160,6 @@ class RootRoute {
     return createReply<Request>(ErrorReply);
   }
 };
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

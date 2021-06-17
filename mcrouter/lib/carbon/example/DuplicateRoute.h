@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <vector>
@@ -37,13 +35,14 @@ class DuplicateRoute {
       : child_(std::move(child)), numCopies_(numCopies) {}
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const facebook::memcache::RouteHandleTraverser<
           typename RouterInfo::RouteHandleIf>& t) const {
     if (child_) {
-      t(*child_, req);
+      return t(*child_, req);
     }
+    return false;
   }
 
   template <class Request>
@@ -54,7 +53,7 @@ class DuplicateRoute {
     std::vector<std::function<Reply()>> funcs;
     funcs.reserve(numCopies_);
     for (size_t i = 0; i < numCopies_; ++i) {
-      funcs.push_back([&req, child = child_ ]() { return child->route(req); });
+      funcs.push_back([&req, child = child_]() { return child->route(req); });
     }
     auto taskIt = folly::fibers::addTasks(funcs.begin(), funcs.end());
 
@@ -98,4 +97,4 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> makeDuplicateRoute(
           std::move(target), numCopies);
 }
 
-} // hellogoodbye
+} // namespace hellogoodbye

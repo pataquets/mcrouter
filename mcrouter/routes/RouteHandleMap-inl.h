@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -14,8 +12,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <folly/Hash.h>
 #include <folly/fibers/FiberManager.h>
+#include <folly/hash/Hash.h>
 
 #include "mcrouter/Proxy.h"
 #include "mcrouter/RoutingPrefix.h"
@@ -65,7 +63,7 @@ std::shared_ptr<RoutePolicyMap<RouteHandleIf>> makePolicyMap(
   return uniqueVectors[v] = std::make_shared<RoutePolicyMap<RouteHandleIf>>(v);
 }
 
-} // detail
+} // namespace detail
 
 template <class RouteHandleIf>
 RouteHandleMap<RouteHandleIf>::RouteHandleMap(
@@ -203,7 +201,7 @@ RouteHandleMap<RouteHandleIf>::getTargetsForKeyFast(
     folly::StringPiece prefix,
     folly::StringPiece key) const {
   const std::vector<std::shared_ptr<RouteHandleIf>>* result = nullptr;
-  if (prefix.empty()) {
+  if (LIKELY(prefix.empty())) {
     // empty prefix => route to default route
     result = &defaultRouteMap_->getTargetsForKey(key);
   } else if (prefix == "/*/*/") {
@@ -261,6 +259,6 @@ RouteHandleMap<RouteHandleIf>::getTargetsForKeyFallback(
   }
   return &emptyV_;
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

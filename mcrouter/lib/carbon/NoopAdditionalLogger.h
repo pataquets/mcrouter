@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 // Forward declaration
@@ -15,9 +13,10 @@ namespace memcache {
 namespace mcrouter {
 class ProxyRequestContext;
 struct RequestLoggerContext;
-} // mcrouter
-} // memcache
-} // facebook
+class RequestClass;
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 namespace carbon {
 
@@ -27,10 +26,23 @@ class NoopAdditionalLogger {
       const facebook::memcache::mcrouter::ProxyRequestContext&) {}
 
   template <class Request>
+  void logBeforeRequestSent(
+      const Request&,
+      const facebook::memcache::mcrouter::RequestLoggerContext&) {}
+
+  template <class Request>
   void log(
       const Request&,
       const typename Request::reply_type&,
       const facebook::memcache::mcrouter::RequestLoggerContext&) {}
+
+  bool mayLog(
+      uint32_t /* unused */,
+      const facebook::memcache::mcrouter::RequestClass& /* unused */,
+      const carbon::Result& /* unused */,
+      const int64_t /* unused */) const {
+    return false;
+  }
 };
 
-} // carbon
+} // namespace carbon

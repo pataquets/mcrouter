@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <memory>
 #include <random>
 #include <vector>
@@ -15,7 +13,7 @@
 
 #include <folly/dynamic.h>
 
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/routes/DefaultShadowPolicy.h"
 #include "mcrouter/routes/ShadowRoute.h"
 #include "mcrouter/routes/ShadowRouteIf.h"
@@ -30,13 +28,13 @@ using std::vector;
 
 TEST(shadowRouteTest, defaultPolicy) {
   vector<std::shared_ptr<TestHandle>> normalHandle{
-      make_shared<TestHandle>(GetRouteTestData(mc_res_found, "a")),
+      make_shared<TestHandle>(GetRouteTestData(carbon::Result::FOUND, "a")),
   };
   auto normalRh = get_route_handles(normalHandle)[0];
 
   vector<std::shared_ptr<TestHandle>> shadowHandles{
-      make_shared<TestHandle>(GetRouteTestData(mc_res_found, "b")),
-      make_shared<TestHandle>(GetRouteTestData(mc_res_found, "c")),
+      make_shared<TestHandle>(GetRouteTestData(carbon::Result::FOUND, "b")),
+      make_shared<TestHandle>(GetRouteTestData(carbon::Result::FOUND, "c")),
   };
 
   TestFiberManager fm{fiber_local<McrouterRouterInfo>::ContextTypeTag()};
@@ -47,7 +45,8 @@ TEST(shadowRouteTest, defaultPolicy) {
 
   auto shadowRhs = get_route_handles(shadowHandles);
   McrouterShadowData shadowData{
-      {std::move(shadowRhs[0]), settings}, {std::move(shadowRhs[1]), settings},
+      {std::move(shadowRhs[0]), settings},
+      {std::move(shadowRhs[1]), settings},
   };
 
   McrouterRouteHandle<ShadowRoute<McrouterRouterInfo, DefaultShadowPolicy>> rh(
@@ -57,7 +56,7 @@ TEST(shadowRouteTest, defaultPolicy) {
     mockFiberContext();
     auto reply = rh.route(McGetRequest("key"));
 
-    EXPECT_EQ(mc_res_found, reply.result());
+    EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
     EXPECT_EQ("a", carbon::valueRangeSlow(reply).str());
   });
 
@@ -69,7 +68,7 @@ TEST(shadowRouteTest, defaultPolicy) {
     mockFiberContext();
     auto reply = rh.route(McGetRequest("key"));
 
-    EXPECT_EQ(mc_res_found, reply.result());
+    EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
     EXPECT_EQ("a", carbon::valueRangeSlow(reply).str());
   });
 

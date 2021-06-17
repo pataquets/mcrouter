@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/dynamic.h>
@@ -20,10 +18,8 @@ namespace facebook {
 namespace memcache {
 namespace mcrouter {
 
-namespace detail {
-
 template <class RouterInfo>
-typename RouterInfo::RouteHandlePtr makeAllMajorityRoute(
+typename RouterInfo::RouteHandlePtr createAllMajorityRoute(
     std::vector<typename RouterInfo::RouteHandlePtr> rh) {
   if (rh.empty()) {
     return createNullRoute<typename RouterInfo::RouteHandleIf>();
@@ -37,8 +33,6 @@ typename RouterInfo::RouteHandlePtr makeAllMajorityRoute(
       std::move(rh));
 }
 
-} // detail
-
 template <class RouterInfo>
 typename RouterInfo::RouteHandlePtr makeAllMajorityRoute(
     RouteHandleFactory<typename RouterInfo::RouteHandleIf>& factory,
@@ -51,8 +45,8 @@ typename RouterInfo::RouteHandlePtr makeAllMajorityRoute(
   } else {
     children = factory.createList(json);
   }
-  return detail::makeAllMajorityRoute<RouterInfo>(std::move(children));
-};
-} // mcrouter
-} // memcache
-} // facebook
+  return createAllMajorityRoute<RouterInfo>(std::move(children));
+}
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

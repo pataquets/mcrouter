@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "CarbonRouterInstanceBase.h"
 
 #include <memory>
@@ -65,10 +63,15 @@ std::string statsUpdateFunctionName(folly::StringPiece routerName) {
       "carbon-stats-update-fn-", routerName, "-", uniqueId.fetch_add(1));
 }
 
+McrouterOptions finalizeOpts(McrouterOptions&& opts) {
+  facebook::memcache::mcrouter::finalizeOptions(opts);
+  return std::move(opts);
+}
+
 } // anonymous namespace
 
 CarbonRouterInstanceBase::CarbonRouterInstanceBase(McrouterOptions inputOptions)
-    : opts_(std::move(inputOptions)),
+    : opts_(finalizeOpts(std::move(inputOptions))),
       pid_(getpid()),
       configApi_(createConfigApi(opts_)),
       rtVarsData_(std::make_shared<ObservableRuntimeVars>()),
@@ -81,6 +84,32 @@ CarbonRouterInstanceBase::CarbonRouterInstanceBase(McrouterOptions inputOptions)
       statsLogger->makeQueueSizeUnlimited();
     }
   }
+
+  if (!opts_.pool_stats_config_file.empty()) {
+    try {
+      folly::dynamic poolStatJson =
+          readStaticJsonFile(opts_.pool_stats_config_file);
+      if (poolStatJson != nullptr) {
+        auto jStatsEnabledPools = poolStatJson.get_ptr("stats_enabled_pools");
+        if (jStatsEnabledPools && jStatsEnabledPools->isArray()) {
+          for (const auto& it : *jStatsEnabledPools) {
+            if (it.isString()) {
+              statsEnabledPools_.push_back(it.asString());
+            } else {
+              LOG(ERROR) << "Pool Name is not a string";
+            }
+          }
+        }
+      }
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Invalid pool-stats-config-file : " << e.what();
+    }
+  }
+  if (opts_.ssl_service_identity_authorization_log ||
+      opts_.ssl_service_identity_authorization_enforce) {
+    setSvcIdentAuthCallbackFunc(
+        facebook::memcache::mcrouter::getAuthChecker(opts_));
+  }
 }
 
 void CarbonRouterInstanceBase::setUpCompressionDictionaries(
@@ -88,13 +117,15 @@ void CarbonRouterInstanceBase::setUpCompressionDictionaries(
   if (codecConfigs.empty() || compressionCodecManager_ != nullptr) {
     return;
   }
-  compressionCodecManager_ = std::make_unique<const CompressionCodecManager>(
-      std::move(codecConfigs));
+  compressionCodecManager_ =
+      std::make_unique<const CompressionCodecManager>(std::move(codecConfigs));
 }
 
-void CarbonRouterInstanceBase::addStartupOpts(
+void CarbonRouterInstanceBase::setStartupOpts(
     std::unordered_map<std::string, std::string> additionalOpts) {
+  DCHECK(!startupOptsInitialized_.load(std::memory_order_acquire));
   additionalStartupOpts_.insert(additionalOpts.begin(), additionalOpts.end());
+  startupOptsInitialized_.store(true, std::memory_order_release);
 }
 
 std::unordered_map<std::string, std::string>
@@ -102,7 +133,9 @@ CarbonRouterInstanceBase::getStartupOpts() const {
   constexpr size_t kMaxOptionValueLength = 256;
 
   auto result = opts_.toDict();
-  result.insert(additionalStartupOpts_.begin(), additionalStartupOpts_.end());
+  if (startupOptsInitialized_.load(std::memory_order_acquire)) {
+    result.insert(additionalStartupOpts_.begin(), additionalStartupOpts_.end());
+  }
   result.emplace("version", MCROUTER_PACKAGE_STRING);
   for (auto& it : result) {
     it.second = shorten(it.second, kMaxOptionValueLength);
@@ -172,6 +205,30 @@ CarbonRouterInstanceBase::functionScheduler() {
   return globalFunctionScheduler.try_get();
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+int32_t CarbonRouterInstanceBase::getStatsEnabledPoolIndex(
+    const folly::StringPiece poolName) const {
+  if (statsEnabledPools_.size() == 0) {
+    return -1;
+  }
+
+  int longestPrefixMatchIndex = -1;
+  // Do sequential search for longest matching name. Since this is done
+  // only once during the initialization and the size of the array is
+  // expected to be small, linear search should be OK.
+  for (size_t i = 0; i < statsEnabledPools_.size(); i++) {
+    if (poolName.subpiece(0, statsEnabledPools_[i].length())
+            .compare(statsEnabledPools_[i]) == 0) {
+      if ((longestPrefixMatchIndex == -1) ||
+          (statsEnabledPools_[longestPrefixMatchIndex].length() <
+           statsEnabledPools_[i].length())) {
+        longestPrefixMatchIndex = i;
+      }
+    }
+  }
+
+  return longestPrefixMatchIndex;
+}
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

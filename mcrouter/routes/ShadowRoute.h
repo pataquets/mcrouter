@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <algorithm>
@@ -20,12 +18,13 @@
 
 #include "mcrouter/McrouterFiberContext.h"
 #include "mcrouter/McrouterLogFailure.h"
-#include "mcrouter/Proxy.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/ProxyBase.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
-#include "mcrouter/route.h"
 #include "mcrouter/routes/DefaultShadowPolicy.h"
+#include "mcrouter/routes/McRouteHandleBuilder.h"
 #include "mcrouter/routes/ShadowRouteIf.h"
+#include "mcrouter/routes/ShadowSettings.h"
 
 namespace folly {
 struct dynamic;
@@ -67,15 +66,20 @@ class ShadowRoute {
         shadowPolicy_(std::move(shadowPolicy)) {}
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    t(*normal_, req);
-    fiber_local<RouterInfo>::runWithLocals([this, &req, &t]() mutable {
+    if (t(*normal_, req)) {
+      return true;
+    }
+    return fiber_local<RouterInfo>::runWithLocals([this, &req, &t]() mutable {
       fiber_local<RouterInfo>::addRequestClass(RequestClass::kShadow);
       for (auto& shadowData : shadowData_) {
-        t(*shadowData.first, req);
+        if (t(*shadowData.first, req)) {
+          return true;
+        }
       }
+      return false;
     });
   }
 
@@ -126,31 +130,27 @@ class ShadowRoute {
 
   template <class Request>
   bool shouldShadow(const Request& req, ShadowSettings* settings) const {
+    auto& ctx = fiber_local<RouterInfo>::getSharedCtx();
+
     if (!settings) {
-      if (auto& reqCtx = fiber_local<RouterInfo>::getSharedCtx()) {
+      if (ctx) {
         MC_LOG_FAILURE(
-            reqCtx->proxy().router().opts(),
+            ctx->proxy().router().opts(),
             failure::Category::kInvalidConfig,
             "ShadowRoute: ShadowSettings is nullptr");
       }
       return false;
     }
-    // If configured to use an explicit list of keys to be shadowed, check for
-    // req.key() in that list. Otherwise, decide to shadow based on keyRange().
-    const auto& keysToShadow = settings->keysToShadow();
-    if (!keysToShadow.empty()) {
-      const auto hashAndKeyToFind =
-          std::make_tuple(req.key().routingKeyHash(), req.key().routingKey());
-      return std::binary_search(
-          keysToShadow.begin(),
-          keysToShadow.end(),
-          hashAndKeyToFind,
-          std::less<std::tuple<uint32_t, folly::StringPiece>>());
+
+    if (!ctx) {
+      LOG_FAILURE(
+          "mcrouter",
+          failure::Category::kInvalidConfig,
+          "ShadowRoute: ProxyRequestContext is nullptr. Ignoring randomness.");
+      return settings->shouldShadowKey(req);
     }
 
-    auto range = settings->keyRange();
-    return range.first <= req.key().routingKeyHash() &&
-        req.key().routingKeyHash() <= range.second;
+    return settings->shouldShadow(req, ctx->proxy().randomGenerator());
   }
 
   template <class Request>
@@ -183,8 +183,8 @@ makeShadowRoutes(
     ProxyBase& proxy,
     ExtraRouteHandleProviderIf<RouterInfo>& extraProvider);
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ShadowRoute-inl.h"

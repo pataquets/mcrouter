@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -16,6 +14,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <unordered_map>
 
@@ -29,6 +28,7 @@
 // Forward declarations
 namespace folly {
 struct dynamic;
+class VirtualEventBase;
 } // namespace folly
 
 namespace facebook {
@@ -38,6 +38,7 @@ class RouteHandleFactory;
 namespace mcrouter {
 template <class RouterInfo>
 class ExtraRouteHandleProviderIf;
+class ProxyBase;
 } // namespace mcrouter
 } // namespace memcache
 } // namespace facebook
@@ -52,7 +53,6 @@ using CarbonTestRoutableRequests = carbon::List<
     TestRequest,
     TestRequestStringKey,
     test2::util::YetAnotherRequest>;
-
 } // namespace detail
 
 struct CarbonTestRouterInfo {
@@ -64,7 +64,7 @@ struct CarbonTestRouterInfo {
   template <class Route>
   using RouteHandle = CarbonTestRouteHandle<Route>;
   using RoutableRequests = detail::CarbonTestRoutableRequests;
-
+  
   using RouterStats = carbon::Stats<CarbonTestRouterStatsConfig>;
 
   using RouteHandleFactoryMap = std::unordered_map<
@@ -74,12 +74,20 @@ struct CarbonTestRouterInfo {
           const folly::dynamic&)>,
       folly::Hash>;
 
+  using RouteHandleFactoryMapWithProxy = std::unordered_map<
+      folly::StringPiece,
+      std::function<RouteHandlePtr(
+          facebook::memcache::RouteHandleFactory<RouteHandleIf>&,
+          const folly::dynamic&,
+          facebook::memcache::mcrouter::ProxyBase&)>,
+      folly::Hash>;
+
   static RouteHandleFactoryMap buildRouteMap();
+  static RouteHandleFactoryMapWithProxy buildRouteMapWithProxy();
 
   static std::unique_ptr<facebook::memcache::mcrouter::
                              ExtraRouteHandleProviderIf<CarbonTestRouterInfo>>
   buildExtraProvider();
 };
-
 } // namespace test
 } // namespace carbon

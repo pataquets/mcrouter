@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -30,12 +28,15 @@
 #include <mcrouter/routes/AllInitialRouteFactory.h>
 #include <mcrouter/routes/AllMajorityRouteFactory.h>
 #include <mcrouter/routes/AllSyncRouteFactory.h>
+#include <mcrouter/routes/BlackholeRoute.h>
 #include <mcrouter/routes/DevNullRoute.h>
 #include <mcrouter/routes/ErrorRoute.h>
 #include <mcrouter/routes/FailoverRoute.h>
 #include <mcrouter/routes/HashRouteFactory.h>
 #include <mcrouter/routes/HostIdRouteFactory.h>
+#include <mcrouter/routes/LatencyInjectionRoute.h>
 #include <mcrouter/routes/LatestRoute.h>
+#include <mcrouter/routes/LoadBalancerRoute.h>
 #include <mcrouter/routes/LoggingRoute.h>
 #include <mcrouter/routes/MigrateRouteFactory.h>
 #include <mcrouter/routes/MissFailoverRoute.h>
@@ -52,6 +53,8 @@ using namespace facebook::memcache::mcrouter;
 namespace carbon {
 namespace test {
 
+constexpr const char* CarbonTestRouterInfo::name;
+
 /* static */ CarbonTestRouterInfo::RouteHandleFactoryMap
 CarbonTestRouterInfo::buildRouteMap() {
   RouteHandleFactoryMap map{
@@ -60,6 +63,7 @@ CarbonTestRouterInfo::buildRouteMap() {
       {"AllInitialRoute", &makeAllInitialRoute<CarbonTestRouterInfo>},
       {"AllMajorityRoute", &makeAllMajorityRoute<CarbonTestRouterInfo>},
       {"AllSyncRoute", &makeAllSyncRoute<CarbonTestRouterInfo>},
+      {"BlackholeRoute", &makeBlackholeRoute<CarbonTestRouterInfo>},
       {"DevNullRoute", &makeDevNullRoute<CarbonTestRouterInfo>},
       {"ErrorRoute", &makeErrorRoute<CarbonTestRouterInfo>},
       {"HashRoute",
@@ -68,7 +72,10 @@ CarbonTestRouterInfo::buildRouteMap() {
          return makeHashRoute<CarbonTestRouterInfo>(factory, json);
        }},
       {"HostIdRoute", &makeHostIdRoute<CarbonTestRouterInfo>},
+      {"LatencyInjectionRoute",
+       &makeLatencyInjectionRoute<CarbonTestRouterInfo>},
       {"LatestRoute", &makeLatestRoute<CarbonTestRouterInfo>},
+      {"LoadBalancerRoute", &makeLoadBalancerRoute<CarbonTestRouterInfo>},
       {"LoggingRoute", &makeLoggingRoute<CarbonTestRouterInfo>},
       {"MigrateRoute", &makeMigrateRoute<CarbonTestRouterInfo>},
       {"MissFailoverRoute", &makeMissFailoverRoute<CarbonTestRouterInfo>},
@@ -81,11 +88,15 @@ CarbonTestRouterInfo::buildRouteMap() {
   return map;
 }
 
+/* static */ CarbonTestRouterInfo::RouteHandleFactoryMapWithProxy
+CarbonTestRouterInfo::buildRouteMapWithProxy() {
+  return RouteHandleFactoryMapWithProxy();
+}
+
 /* static */
 std::unique_ptr<ExtraRouteHandleProviderIf<CarbonTestRouterInfo>>
 CarbonTestRouterInfo::buildExtraProvider() {
   return std::make_unique<McExtraRouteHandleProvider<CarbonTestRouterInfo>>();
 }
-
 } // namespace test
 } // namespace carbon

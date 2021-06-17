@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <deque>
@@ -33,9 +31,10 @@ class SessionTestHarness {
  private:
   class NoopCallback : public McServerSession::StateCallback {
    public:
+    void onAccepted(McServerSession&) final {}
     void onWriteQuiescence(McServerSession&) final {}
     void onCloseStart(McServerSession&) final {}
-    void onCloseFinish(McServerSession&) final {}
+    void onCloseFinish(McServerSession&, bool) final {}
     void onShutdown() final {}
   };
   static NoopCallback noopCb;
@@ -53,7 +52,7 @@ class SessionTestHarness {
    * NOTE: Look at McServerSession.h for info about the above callbacks
    */
   explicit SessionTestHarness(
-      AsyncMcServerWorkerOptions opts = AsyncMcServerWorkerOptions(),
+      const AsyncMcServerWorkerOptions& opts,
       McServerSession::StateCallback& cb = SessionTestHarness::noopCb);
 
   /**
@@ -71,7 +70,7 @@ class SessionTestHarness {
   /**
    * Get the current list of writes on the socket.
    *
-   * A write is a result of TAsyncTransport::write*().
+   * A write is a result of AsyncTransport::write*().
    *
    * This is stateful: a single write will only be returned by
    * this method once.
@@ -152,7 +151,7 @@ class SessionTestHarness {
     Transaction(Request&& req, folly::Function<void(const Request&)> replyFn)
         : req_(std::move(req)), replyFn_(std::move(replyFn)) {}
     std::string key() const final {
-      return req_.key().fullKey().str();
+      return req_.key_ref()->fullKey().str();
     }
     void reply() final {
       replyFn_(req_);
@@ -217,11 +216,11 @@ class SessionTestHarness {
   std::unique_ptr<Transaction<McGetRequest>> makeTransaction(
       McServerRequestContext&& ctx,
       McGetRequest&& req) {
-    auto value = req.key().fullKey().str() + "_value";
-    auto replyFn = [ ctx = std::move(ctx), value = std::move(value) ](
-        const McGetRequest&) mutable {
-      McGetReply reply(mc_res_found);
-      reply.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, value);
+    auto value = req.key_ref()->fullKey().str() + "_value";
+    auto replyFn = [ctx = std::move(ctx),
+                    value = std::move(value)](const McGetRequest&) mutable {
+      McGetReply reply(carbon::Result::FOUND);
+      reply.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, value);
       McServerRequestContext::reply(std::move(ctx), std::move(reply));
     };
     return std::make_unique<Transaction<McGetRequest>>(
@@ -246,5 +245,5 @@ class SessionTestHarness {
 
 inline SessionTestHarness::TransactionIf::~TransactionIf() {}
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

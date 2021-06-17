@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <algorithm>
 
 #include <gtest/gtest.h>
@@ -14,27 +12,14 @@
 #include <folly/Conv.h>
 
 #include "mcrouter/lib/RendezvousHashFunc.h"
+#include "mcrouter/lib/test/HashTestUtil.h"
 
 using namespace facebook::memcache;
 
 namespace {
-std::pair<std::vector<std::string>, std::vector<folly::StringPiece>>
-genEndpoints(int n) {
-  std::vector<std::string> raw;
-  std::vector<folly::StringPiece> ref;
-  for (int i = 0; i < n; ++i) {
-    auto endpoint = "xxx." + folly::to<std::string>(i) + ".yy";
-    raw.push_back(endpoint);
-  }
-  for (const auto& e : raw) {
-    ref.push_back(e);
-  }
-  return std::make_pair(std::move(raw), std::move(ref));
-}
-
 RendezvousHashFunc genRendezvousHashFunc(int n) {
-  auto combined = genEndpoints(n);
-  return RendezvousHashFunc(combined.second);
+  auto combined = test::genEndpoints(n);
+  return RendezvousHashFunc(combined.second, folly::dynamic());
 }
 
 } // namespace
@@ -90,17 +75,17 @@ TEST(RendezvousHashFunc, rendezvous_10) {
 
 TEST(RendezvousHashFunc, rendezvous_rehash) {
   const uint32_t n = 499;
-  auto combined = genEndpoints(n);
+  auto combined = test::genEndpoints(n);
   const auto& endpoints = combined.second;
 
-  RendezvousHashFunc rendezvous(endpoints);
+  RendezvousHashFunc rendezvous(endpoints, folly::dynamic());
 
   // Number of rehashes if we remove one element
   auto removeCompare = [&](std::vector<folly::StringPiece>& newEndpoints,
                            std::vector<folly::StringPiece>::iterator it) {
     newEndpoints.erase(it);
 
-    RendezvousHashFunc newRendezvous(newEndpoints);
+    RendezvousHashFunc newRendezvous(newEndpoints, folly::dynamic());
 
     int numDiff = 0;
     for (size_t i = 0; i < 10000; ++i) {

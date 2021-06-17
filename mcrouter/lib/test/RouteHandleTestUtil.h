@@ -1,29 +1,31 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <folly/Optional.h>
+#include <folly/Traits.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/fibers/SimpleLoopController.h>
 #include <folly/fibers/WhenN.h>
 
 #include "mcrouter/lib/IOBufUtil.h"
-#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/config/RouteHandleBuilder.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/config/RouteHandleProviderIf.h"
+#include "mcrouter/lib/network/MessageHelpers.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
+#include "mcrouter/lib/routes/NullRoute.h"
 
 namespace facebook {
 namespace memcache {
@@ -31,52 +33,100 @@ namespace memcache {
 namespace detail {
 
 template <class M>
-typename std::enable_if<M::hasFlags>::type testSetFlags(
+typename std::enable_if<HasFlagsTrait<M>::value>::type testSetFlags(
     M& message,
     uint64_t flags) {
-  message.flags() = flags;
+  message.flags_ref() = flags;
 }
 template <class M>
-typename std::enable_if<!M::hasFlags>::type testSetFlags(M&, uint64_t) {}
+typename std::enable_if<!HasFlagsTrait<M>::value>::type testSetFlags(
+    M&,
+    uint64_t) {}
 
 template <class Reply>
-typename std::enable_if<Reply::hasValue, void>::type setReplyValue(
+typename std::enable_if<HasValueTrait<Reply>::value, void>::type setReplyValue(
     Reply& reply,
     const std::string& val) {
-  reply.value() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, val);
+  reply.value_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, val);
 }
 template <class Reply>
-typename std::enable_if<!Reply::hasValue, void>::type setReplyValue(
+typename std::enable_if<!HasValueTrait<Reply>::value, void>::type setReplyValue(
     Reply&,
     const std::string& /* val */) {}
-} // detail
+} // namespace detail
+
+/**
+ * Very basic route handle provider to be used in unit tests only.
+ */
+template <class RouteHandleIf>
+class SimpleRouteHandleProvider : public RouteHandleProviderIf<RouteHandleIf> {
+ public:
+  std::vector<std::shared_ptr<RouteHandleIf>> create(
+      RouteHandleFactory<RouteHandleIf>& /* factory */,
+      folly::StringPiece type,
+      const folly::dynamic& json) override {
+    std::vector<std::shared_ptr<RouteHandleIf>> result;
+
+    const folly::dynamic* jsonPtr = nullptr;
+    if (type == "Pool") {
+      jsonPtr = json.get_ptr("servers");
+    } else {
+      jsonPtr = &json;
+    }
+
+    if (jsonPtr->isArray()) {
+      for (const auto& child : *jsonPtr) {
+        (void)child;
+        result.push_back(mcrouter::createNullRoute<RouteHandleIf>());
+      }
+    } else {
+      result.push_back(mcrouter::createNullRoute<RouteHandleIf>());
+    }
+    return result;
+  }
+
+  const folly::dynamic& parsePool(const folly::dynamic& json) override {
+    return json;
+  }
+};
 
 struct GetRouteTestData {
-  mc_res_t result_;
+  carbon::Result result_;
   std::string value_;
   int64_t flags_;
+  int16_t appSpecificErrorCode_;
 
   GetRouteTestData()
-      : result_(mc_res_unknown), value_(std::string()), flags_(0) {}
+      : result_(carbon::Result::UNKNOWN),
+        value_(std::string()),
+        flags_(0),
+        appSpecificErrorCode_(0) {}
 
-  GetRouteTestData(mc_res_t result, const std::string& value, int64_t flags = 0)
-      : result_(result), value_(value), flags_(flags) {}
+  GetRouteTestData(
+      carbon::Result result,
+      const std::string& value,
+      int64_t flags = 0,
+      int16_t appSpecificErrorCode = 0)
+      : result_(result),
+        value_(value),
+        flags_(flags),
+        appSpecificErrorCode_(appSpecificErrorCode) {}
 };
 
 struct UpdateRouteTestData {
-  mc_res_t result_;
+  carbon::Result result_;
   uint64_t flags_;
 
-  UpdateRouteTestData() : result_(mc_res_unknown), flags_(0) {}
+  UpdateRouteTestData() : result_(carbon::Result::UNKNOWN), flags_(0) {}
 
-  explicit UpdateRouteTestData(mc_res_t result, uint64_t flags = 0)
+  explicit UpdateRouteTestData(carbon::Result result, uint64_t flags = 0)
       : result_(result), flags_(flags) {}
 };
 
 struct DeleteRouteTestData {
-  mc_res_t result_;
+  carbon::Result result_;
 
-  explicit DeleteRouteTestData(mc_res_t result = mc_res_unknown)
+  explicit DeleteRouteTestData(carbon::Result result = carbon::Result::UNKNOWN)
       : result_(result) {}
 };
 
@@ -97,11 +147,21 @@ struct TestHandleImpl {
 
   std::vector<int64_t> sawLeaseTokensSet;
 
+  std::vector<std::string> sawShadowIds;
+
+  std::vector<uint64_t> sawFlags;
+
   bool isTko;
 
   bool isPaused;
 
   std::vector<folly::fibers::Promise<void>> promises_;
+
+  std::string sawLogs;
+
+  folly::Optional<std::function<carbon::Result(std::string reqKey)>>
+      resultGenerator_;
+  folly::Optional<std::function<std::string()>> logCapturer;
 
   explicit TestHandleImpl(GetRouteTestData td)
       : rh(makeRouteHandle<RouteHandleIf, RecordingRoute>(
@@ -170,7 +230,29 @@ struct TestHandleImpl {
     });
     isPaused = false;
   }
+
+  void setResultGenerator(
+      std::function<carbon::Result(std::string reqKey)> getResult) {
+    resultGenerator_ = std::move(getResult);
+  }
+
+  void resetResultGenerator() {
+    resultGenerator_ = folly::none;
+  }
+
+  void enableLogCapture(std::function<std::string()> fun) {
+    logCapturer = std::move(fun);
+  }
 };
+
+template <class Request, typename = std::void_t<>>
+struct HasShadowId : public std::false_type {};
+
+template <class Request>
+struct HasShadowId<
+    Request,
+    std::void_t<decltype(std::declval<Request>().shadowId_ref())>>
+    : public std::true_type {};
 
 /* Records all the keys we saw */
 template <class RouteHandleIf>
@@ -180,8 +262,10 @@ struct RecordingRoute {
   }
 
   template <class Request>
-  void traverse(const Request&, const RouteHandleTraverser<RouteHandleIf>&)
-      const {}
+  bool traverse(const Request&, const RouteHandleTraverser<RouteHandleIf>&)
+      const {
+    return false;
+  }
 
   GetRouteTestData dataGet_;
   UpdateRouteTestData dataUpdate_;
@@ -203,8 +287,37 @@ struct RecordingRoute {
   }
 
   McLeaseSetReply route(const McLeaseSetRequest& req) {
-    h_->sawLeaseTokensSet.push_back(req.leaseToken());
+    h_->sawLeaseTokensSet.push_back(*req.leaseToken_ref());
     return routeInternal(req);
+  }
+
+  template <class Request>
+  std::enable_if_t<HasShadowId<Request>::value, void> recordShadowId(
+      const Request& req) {
+    h_->sawShadowIds.push_back(*req.shadowId_ref());
+  }
+  template <class Request>
+  std::enable_if_t<!HasShadowId<Request>::value, void> recordShadowId(
+      const Request&) {}
+
+  template <typename T, typename = void>
+  struct has_app_error : std::false_type {};
+  template <typename T>
+  struct has_app_error<
+      T,
+      folly::void_t<decltype(std::declval<T>().appSpecificErrorCode_ref())>>
+      : std::true_type {};
+
+  template <
+      typename Reply,
+      typename std::enable_if_t<!has_app_error<Reply>::value>* = nullptr>
+  void setAppspecificErrorCode(Reply& /* unused */) {}
+
+  template <
+      typename Reply,
+      typename std::enable_if_t<has_app_error<Reply>::value>* = nullptr>
+  void setAppspecificErrorCode(Reply& reply) {
+    reply.appSpecificErrorCode_ref() = dataGet_.appSpecificErrorCode_;
   }
 
   template <class Request>
@@ -219,26 +332,40 @@ struct RecordingRoute {
       h_->wait();
     }
 
-    h_->saw_keys.push_back(req.key().fullKey().str());
+    if (h_->logCapturer) {
+      h_->sawLogs = (*h_->logCapturer)();
+    }
+
+    h_->saw_keys.push_back(req.key_ref()->fullKey().str());
     h_->sawOperations.push_back(Request::name);
-    h_->sawExptimes.push_back(req.exptime());
+    h_->sawExptimes.push_back(getExptimeIfExist(req));
+    h_->sawFlags.push_back(getFlagsIfExist(req));
+    recordShadowId(req);
     if (carbon::GetLike<Request>::value) {
-      reply.result() = dataGet_.result_;
+      reply.result_ref() = h_->resultGenerator_.hasValue()
+          ? (*h_->resultGenerator_)(req.key_ref()->fullKey().str())
+          : dataGet_.result_;
       detail::setReplyValue(reply, dataGet_.value_);
       detail::testSetFlags(reply, dataGet_.flags_);
+      setAppspecificErrorCode(reply);
       return reply;
     }
     if (carbon::UpdateLike<Request>::value) {
-      assert(carbon::valuePtrUnsafe(req) != nullptr);
-      auto val = carbon::valuePtrUnsafe(req)->clone();
-      folly::StringPiece sp_value = coalesceAndGetRange(val);
-      h_->sawValues.push_back(sp_value.str());
-      reply.result() = dataUpdate_.result_;
+      if (carbon::valuePtrUnsafe(req) != nullptr) {
+        auto val = carbon::valuePtrUnsafe(req)->clone();
+        folly::StringPiece sp_value = coalesceAndGetRange(val);
+        h_->sawValues.push_back(sp_value.str());
+      }
+      reply.result_ref() = h_->resultGenerator_.hasValue()
+          ? (*h_->resultGenerator_)(req.key_ref()->fullKey().str())
+          : dataUpdate_.result_;
       detail::testSetFlags(reply, dataUpdate_.flags_);
       return reply;
     }
     if (carbon::DeleteLike<Request>::value) {
-      reply.result() = dataDelete_.result_;
+      reply.result_ref() = h_->resultGenerator_.hasValue()
+          ? (*h_->resultGenerator_)(req.key_ref()->fullKey().str())
+          : dataDelete_.result_;
       return reply;
     }
     return createReply(DefaultReply, req);
@@ -258,12 +385,17 @@ inline std::vector<std::shared_ptr<RouteHandleIf>> get_route_handles(
 
 class TestFiberManager {
  public:
-  TestFiberManager()
-      : fm_(std::make_unique<folly::fibers::SimpleLoopController>()) {}
+  TestFiberManager(size_t recordFiberStackEvery = kRecordFiberStackEveryDefault)
+      : fm_(std::make_unique<folly::fibers::SimpleLoopController>(),
+            getFiberOptions(recordFiberStackEvery)) {}
 
   template <class LocalType>
-  explicit TestFiberManager(LocalType t)
-      : fm_(t, std::make_unique<folly::fibers::SimpleLoopController>()) {}
+  explicit TestFiberManager(
+      LocalType t,
+      size_t recordFiberStackEvery = kRecordFiberStackEveryDefault)
+      : fm_(t,
+            std::make_unique<folly::fibers::SimpleLoopController>(),
+            getFiberOptions(recordFiberStackEvery)) {}
 
   void run(std::function<void()>&& fun) {
     runAll({std::move(fun)});
@@ -279,6 +411,13 @@ class TestFiberManager {
     });
 
     loopController.loop([]() {});
+
+    // Fiber stack high watermark stat is only available for build without ASAN
+    // since Folly always returns 0 when FOLLY_SANITIZE_ADDRESS is set.
+    auto stackHighWatermark = fm.stackHighWatermark();
+    if (stackHighWatermark > 0) {
+      VLOG(2) << "fiber stack high watermark: " << stackHighWatermark;
+    }
   }
 
   folly::fibers::FiberManager& getFiberManager() {
@@ -287,6 +426,14 @@ class TestFiberManager {
 
  private:
   folly::fibers::FiberManager fm_;
+  static constexpr size_t kRecordFiberStackEveryDefault = 0;
+
+  static folly::fibers::FiberManager::Options getFiberOptions(
+      size_t recordFiberStackEvery = 0) {
+    folly::fibers::FiberManager::Options ret;
+    ret.recordStackEvery = recordFiberStackEvery;
+    return ret;
+  }
 };
 
 inline std::string toString(const folly::IOBuf& buf) {
@@ -300,5 +447,5 @@ std::string replyFor(Rh& rh, const std::string& key) {
   return carbon::valueRangeSlow(reply).str();
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

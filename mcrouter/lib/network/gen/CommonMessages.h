@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -23,7 +21,6 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <mcrouter/lib/carbon/CarbonProtocolReader.h>
-#include <mcrouter/lib/carbon/CarbonProtocolWriter.h>
 #include <mcrouter/lib/carbon/CommonSerializationTraits.h>
 #include <mcrouter/lib/carbon/Keys.h>
 #include <mcrouter/lib/carbon/ReplyCommon.h>
@@ -33,18 +30,17 @@
 #include <mcrouter/lib/carbon/TypeList.h>
 #include <mcrouter/lib/carbon/Variant.h>
 
+#include "mcrouter/lib/network/gen/gen-cpp2/Common_types.h"
+
 namespace facebook {
 namespace memcache {
 
 class McVersionReply;
 
-class McVersionRequest : public carbon::RequestCommon {
+class McVersionRequest : public carbon::RequestCommon, public facebook::memcache::thrift::McVersionRequest {
  public:
   using reply_type = McVersionReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 25;
   static constexpr const char* name = "version";
 
@@ -53,42 +49,20 @@ class McVersionRequest : public carbon::RequestCommon {
   McVersionRequest& operator=(const McVersionRequest&) = default;
   McVersionRequest(McVersionRequest&&) = default;
   McVersionRequest& operator=(McVersionRequest&&) = default;
-  explicit McVersionRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit McVersionRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit McVersionRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McVersionRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McVersionRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
 };
 
-class McVersionReply : public carbon::ReplyCommon {
+class McVersionReply : public carbon::ReplyCommon, public facebook::memcache::thrift::McVersionReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = true;
+
   static constexpr size_t typeId = 26;
 
   McVersionReply() = default;
@@ -96,65 +70,20 @@ class McVersionReply : public carbon::ReplyCommon {
   McVersionReply& operator=(const McVersionReply&) = default;
   McVersionReply(McVersionReply&&) = default;
   McVersionReply& operator=(McVersionReply&&) = default;
-  explicit McVersionReply(carbon::Result carbonResult)
-      : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const folly::IOBuf& value() const {
-    return value_;
-  }
-  folly::IOBuf& value() {
-    return value_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  int16_t appSpecificErrorCode() const {
-    return appSpecificErrorCode_;
-  }
-  int16_t& appSpecificErrorCode() {
-    return appSpecificErrorCode_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McVersionReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McVersionReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  folly::IOBuf value_;
-  std::string message_;
-  carbon::Result result_{mc_res_unknown};
-  int16_t appSpecificErrorCode_{0};
 };
 
 class McStatsReply;
 
-class McStatsRequest : public carbon::RequestCommon {
+class McStatsRequest : public carbon::RequestCommon, public facebook::memcache::thrift::McStatsRequest {
  public:
   using reply_type = McStatsReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 33;
   static constexpr const char* name = "stats";
 
@@ -163,42 +92,20 @@ class McStatsRequest : public carbon::RequestCommon {
   McStatsRequest& operator=(const McStatsRequest&) = default;
   McStatsRequest(McStatsRequest&&) = default;
   McStatsRequest& operator=(McStatsRequest&&) = default;
-  explicit McStatsRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit McStatsRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit McStatsRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McStatsRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McStatsRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
 };
 
-class McStatsReply : public carbon::ReplyCommon {
+class McStatsReply : public carbon::ReplyCommon, public facebook::memcache::thrift::McStatsReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 34;
 
   McStatsReply() = default;
@@ -206,64 +113,20 @@ class McStatsReply : public carbon::ReplyCommon {
   McStatsReply& operator=(const McStatsReply&) = default;
   McStatsReply(McStatsReply&&) = default;
   McStatsReply& operator=(McStatsReply&&) = default;
-  explicit McStatsReply(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  const std::vector<std::string>& stats() const {
-    return stats_;
-  }
-  std::vector<std::string>& stats() {
-    return stats_;
-  }
-  int16_t appSpecificErrorCode() const {
-    return appSpecificErrorCode_;
-  }
-  int16_t& appSpecificErrorCode() {
-    return appSpecificErrorCode_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McStatsReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McStatsReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string message_;
-  std::vector<std::string> stats_;
-  carbon::Result result_{mc_res_unknown};
-  int16_t appSpecificErrorCode_{0};
 };
 
 class McShutdownReply;
 
-class McShutdownRequest : public carbon::RequestCommon {
+class McShutdownRequest : public carbon::RequestCommon, public facebook::memcache::thrift::McShutdownRequest {
  public:
   using reply_type = McShutdownReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 35;
   static constexpr const char* name = "shutdown";
 
@@ -272,42 +135,20 @@ class McShutdownRequest : public carbon::RequestCommon {
   McShutdownRequest& operator=(const McShutdownRequest&) = default;
   McShutdownRequest(McShutdownRequest&&) = default;
   McShutdownRequest& operator=(McShutdownRequest&&) = default;
-  explicit McShutdownRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit McShutdownRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit McShutdownRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McShutdownRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McShutdownRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
 };
 
-class McShutdownReply : public carbon::ReplyCommon {
+class McShutdownReply : public carbon::ReplyCommon, public facebook::memcache::thrift::McShutdownReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 36;
 
   McShutdownReply() = default;
@@ -315,58 +156,20 @@ class McShutdownReply : public carbon::ReplyCommon {
   McShutdownReply& operator=(const McShutdownReply&) = default;
   McShutdownReply(McShutdownReply&&) = default;
   McShutdownReply& operator=(McShutdownReply&&) = default;
-  explicit McShutdownReply(carbon::Result carbonResult)
-      : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  int16_t appSpecificErrorCode() const {
-    return appSpecificErrorCode_;
-  }
-  int16_t& appSpecificErrorCode() {
-    return appSpecificErrorCode_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McShutdownReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McShutdownReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string message_;
-  carbon::Result result_{mc_res_unknown};
-  int16_t appSpecificErrorCode_{0};
 };
 
 class McQuitReply;
 
-class McQuitRequest : public carbon::RequestCommon {
+class McQuitRequest : public carbon::RequestCommon, public facebook::memcache::thrift::McQuitRequest {
  public:
   using reply_type = McQuitReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 37;
   static constexpr const char* name = "quit";
 
@@ -375,42 +178,20 @@ class McQuitRequest : public carbon::RequestCommon {
   McQuitRequest& operator=(const McQuitRequest&) = default;
   McQuitRequest(McQuitRequest&&) = default;
   McQuitRequest& operator=(McQuitRequest&&) = default;
-  explicit McQuitRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit McQuitRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit McQuitRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McQuitRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McQuitRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
 };
 
-class McQuitReply : public carbon::ReplyCommon {
+class McQuitReply : public carbon::ReplyCommon, public facebook::memcache::thrift::McQuitReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 38;
 
   McQuitReply() = default;
@@ -418,57 +199,20 @@ class McQuitReply : public carbon::ReplyCommon {
   McQuitReply& operator=(const McQuitReply&) = default;
   McQuitReply(McQuitReply&&) = default;
   McQuitReply& operator=(McQuitReply&&) = default;
-  explicit McQuitReply(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  int16_t appSpecificErrorCode() const {
-    return appSpecificErrorCode_;
-  }
-  int16_t& appSpecificErrorCode() {
-    return appSpecificErrorCode_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McQuitReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McQuitReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string message_;
-  carbon::Result result_{mc_res_unknown};
-  int16_t appSpecificErrorCode_{0};
 };
 
 class McExecReply;
 
-class McExecRequest : public carbon::RequestCommon {
+class McExecRequest : public carbon::RequestCommon, public facebook::memcache::thrift::McExecRequest {
  public:
   using reply_type = McExecReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 39;
   static constexpr const char* name = "exec";
 
@@ -477,42 +221,20 @@ class McExecRequest : public carbon::RequestCommon {
   McExecRequest& operator=(const McExecRequest&) = default;
   McExecRequest(McExecRequest&&) = default;
   McExecRequest& operator=(McExecRequest&&) = default;
-  explicit McExecRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit McExecRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit McExecRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McExecRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McExecRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
 };
 
-class McExecReply : public carbon::ReplyCommon {
+class McExecReply : public carbon::ReplyCommon, public facebook::memcache::thrift::McExecReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 40;
 
   McExecReply() = default;
@@ -520,64 +242,20 @@ class McExecReply : public carbon::ReplyCommon {
   McExecReply& operator=(const McExecReply&) = default;
   McExecReply(McExecReply&&) = default;
   McExecReply& operator=(McExecReply&&) = default;
-  explicit McExecReply(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& response() const {
-    return response_;
-  }
-  std::string& response() {
-    return response_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  int16_t appSpecificErrorCode() const {
-    return appSpecificErrorCode_;
-  }
-  int16_t& appSpecificErrorCode() {
-    return appSpecificErrorCode_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit McExecReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<McExecReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string response_;
-  std::string message_;
-  carbon::Result result_{mc_res_unknown};
-  int16_t appSpecificErrorCode_{0};
 };
 
 class GoAwayRequest;
 
-class GoAwayAcknowledgement : public carbon::RequestCommon {
+class GoAwayAcknowledgement : public carbon::RequestCommon, public facebook::memcache::thrift::GoAwayAcknowledgement {
  public:
   using reply_type = GoAwayRequest;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 41;
   static constexpr const char* name = "goaway";
 
@@ -587,31 +265,13 @@ class GoAwayAcknowledgement : public carbon::RequestCommon {
   GoAwayAcknowledgement(GoAwayAcknowledgement&&) = default;
   GoAwayAcknowledgement& operator=(GoAwayAcknowledgement&&) = default;
 
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
-  }
+  friend class apache::thrift::Cpp2Ops<GoAwayAcknowledgement>;
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
-
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
 };
 
-class GoAwayRequest : public carbon::ReplyCommon {
+class GoAwayRequest : public carbon::ReplyCommon, public facebook::memcache::thrift::GoAwayRequest {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 42;
 
   GoAwayRequest() = default;
@@ -619,41 +279,13 @@ class GoAwayRequest : public carbon::ReplyCommon {
   GoAwayRequest& operator=(const GoAwayRequest&) = default;
   GoAwayRequest(GoAwayRequest&&) = default;
   GoAwayRequest& operator=(GoAwayRequest&&) = default;
-  explicit GoAwayRequest(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& reason() const {
-    return reason_;
-  }
-  std::string& reason() {
-    return reason_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit GoAwayRequest(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<GoAwayRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string reason_;
-  carbon::Result result_{mc_res_unknown};
 };
-
 } // namespace memcache
 } // namespace facebook
 

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
@@ -14,14 +12,14 @@
 #include <folly/Range.h>
 
 #include "mcrouter/McrouterFiberContext.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/carbon/RequestReplyUtil.h"
 #include "mcrouter/lib/mc/msg.h"
-#include "mcrouter/lib/network/ReplyStatsContext.h"
+#include "mcrouter/lib/network/RpcStatsContext.h"
 
 namespace folly {
 class IOBuf;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -29,6 +27,75 @@ namespace memcache {
 struct AccessPoint;
 
 namespace mcrouter {
+
+enum class RequestLoggerContextFlags : uint8_t {
+  NONE = 0x00,
+  // Underlying routing is SR based
+  USING_SR = 0x01,
+};
+
+/*
+ * union operator
+ */
+constexpr RequestLoggerContextFlags operator|(
+    RequestLoggerContextFlags a,
+    RequestLoggerContextFlags b) {
+  return static_cast<RequestLoggerContextFlags>(
+      static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+/*
+ * compound assignment union operator
+ */
+constexpr RequestLoggerContextFlags& operator|=(
+    RequestLoggerContextFlags& a,
+    RequestLoggerContextFlags b) {
+  a = a | b;
+  return a;
+}
+
+/*
+ * intersection operator
+ */
+constexpr RequestLoggerContextFlags operator&(
+    RequestLoggerContextFlags a,
+    RequestLoggerContextFlags b) {
+  return static_cast<RequestLoggerContextFlags>(
+      static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+
+/*
+ * compound assignment intersection operator
+ */
+constexpr RequestLoggerContextFlags& operator&=(
+    RequestLoggerContextFlags& a,
+    RequestLoggerContextFlags b) {
+  a = a & b;
+  return a;
+}
+
+/*
+ * exclusion parameter
+ */
+constexpr RequestLoggerContextFlags operator~(RequestLoggerContextFlags a) {
+  return static_cast<RequestLoggerContextFlags>(~static_cast<uint32_t>(a));
+}
+
+/*
+ * unset operator
+ */
+constexpr RequestLoggerContextFlags unSet(
+    RequestLoggerContextFlags a,
+    RequestLoggerContextFlags b) {
+  return a & ~b;
+}
+
+/*
+ * inclusion operator
+ */
+constexpr bool isSet(RequestLoggerContextFlags a, RequestLoggerContextFlags b) {
+  return (a & b) == b;
+}
 
 struct RequestLoggerContext {
   RequestLoggerContext(
@@ -38,8 +105,11 @@ struct RequestLoggerContext {
       RequestClass requestClass_,
       const int64_t startTimeUs_,
       const int64_t endTimeUs_,
-      const mc_res_t replyResult_,
-      const ReplyStatsContext replyStatsContext_)
+      const carbon::Result replyResult_,
+      const RpcStatsContext rpcStatsContext_,
+      const int64_t networkTransportTimeUs_,
+      const std::vector<ExtraDataCallbackT>& extraDataCallbacks_,
+      const RequestLoggerContextFlags flags_ = RequestLoggerContextFlags::NONE)
       : strippedRoutingPrefix(strippedRoutingPrefix_),
         requestClass(requestClass_),
         poolName(poolName_),
@@ -47,7 +117,10 @@ struct RequestLoggerContext {
         startTimeUs(startTimeUs_),
         endTimeUs(endTimeUs_),
         replyResult(replyResult_),
-        replyStatsContext(replyStatsContext_) {}
+        rpcStatsContext(rpcStatsContext_),
+        networkTransportTimeUs(networkTransportTimeUs_),
+        extraDataCallbacks(extraDataCallbacks_),
+        flags(flags_) {}
 
   RequestLoggerContext(const RequestLoggerContext&) = delete;
   RequestLoggerContext& operator=(const RequestLoggerContext&) = delete;
@@ -58,10 +131,13 @@ struct RequestLoggerContext {
   const AccessPoint& ap;
   const int64_t startTimeUs;
   const int64_t endTimeUs;
-  const mc_res_t replyResult;
-  const ReplyStatsContext replyStatsContext;
+  const carbon::Result replyResult;
+  const RpcStatsContext rpcStatsContext;
+  const int64_t networkTransportTimeUs;
+  const std::vector<ExtraDataCallbackT>& extraDataCallbacks;
+  const RequestLoggerContextFlags flags;
 };
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "AsyncWriter.h"
 
 #include <folly/Range.h>
@@ -16,7 +14,6 @@
 
 #include "mcrouter/AsyncWriterEntry.h"
 #include "mcrouter/McrouterLogFailure.h"
-#include "mcrouter/lib/fbi/cpp/sfrlock.h"
 
 namespace facebook {
 namespace memcache {
@@ -38,7 +35,7 @@ AsyncWriter::~AsyncWriter() {
 
 void AsyncWriter::stop() noexcept {
   {
-    std::lock_guard<SFRWriteLock> lock(runLock_.writeLock());
+    folly::SharedMutex::WriteHolder lock(runLock_);
     if (stopped_) {
       return;
     }
@@ -56,7 +53,7 @@ void AsyncWriter::stop() noexcept {
 }
 
 bool AsyncWriter::start(folly::StringPiece threadName) {
-  std::lock_guard<SFRWriteLock> lock(runLock_.writeLock());
+  folly::SharedMutex::WriteHolder lock(runLock_);
   if (thread_.joinable() || stopped_) {
     return false;
   }
@@ -69,7 +66,7 @@ bool AsyncWriter::start(folly::StringPiece threadName) {
       eventBase_.loopForever();
 
       while (fiberManager_.hasTasks()) {
-        fiberManager_.loopUntilNoReady();
+        eventBase_.loopOnce();
       }
     });
   } catch (const std::system_error& e) {
@@ -86,7 +83,7 @@ bool AsyncWriter::start(folly::StringPiece threadName) {
 }
 
 bool AsyncWriter::run(std::function<void()> f) {
-  std::lock_guard<SFRReadLock> lock(runLock_.readLock());
+  folly::SharedMutex::ReadHolder lock(runLock_);
   if (stopped_) {
     return false;
   }
@@ -102,25 +99,18 @@ bool AsyncWriter::run(std::function<void()> f) {
     decQueueSize = true;
   }
 
-  fiberManager_.addTaskRemote([ this, f_ = std::move(f), decQueueSize ]() {
-    fiberManager_.runInMainContext(std::move(f_));
-    if (decQueueSize) {
-      --queueSize_;
-    }
-  });
+  fiberManager_.addTaskRemote(
+      [this, f_ = std::move(f), decQueueSize]() mutable {
+        fiberManager_.runInMainContext(std::move(f_));
+        if (decQueueSize) {
+          --queueSize_;
+        }
+      });
   return true;
 }
 
-void AsyncWriter::completePendingTasks() {
-  // Schedule a task and wait for it to complete. This relies on the fact that
-  // tasks are executed in FIFO order.
-  folly::fibers::Baton baton;
-  run([&]() { baton.post(); });
-  baton.wait();
-}
-
 void AsyncWriter::increaseMaxQueueSize(size_t add) {
-  std::lock_guard<SFRWriteLock> lock(runLock_.writeLock());
+  folly::SharedMutex::WriteHolder lock(runLock_);
   // Don't touch maxQueueSize_ if it's already unlimited (zero).
   if (maxQueueSize_ != 0) {
     maxQueueSize_ += add;
@@ -128,7 +118,7 @@ void AsyncWriter::increaseMaxQueueSize(size_t add) {
 }
 
 void AsyncWriter::makeQueueSizeUnlimited() {
-  std::lock_guard<SFRWriteLock> lock(runLock_.writeLock());
+  folly::SharedMutex::WriteHolder lock(runLock_);
   maxQueueSize_ = 0;
 }
 
@@ -142,6 +132,7 @@ bool awriter_queue(AsyncWriter* w, awriter_entry_t* e) {
     e->callbacks->completed(e, r);
   });
 }
-}
-}
-} // facebook::memcache::mcrouter
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

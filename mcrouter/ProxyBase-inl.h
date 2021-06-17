@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <memory>
 
 #include <folly/Random.h>
@@ -34,14 +32,16 @@ ProxyBase::ProxyBase(
           std::make_unique<folly::fibers::EventBaseLoopController>(),
           getFiberManagerOptions(router_.opts())),
       asyncLog_(router_.opts()),
+      stats_(router_.getStatsEnabledPools()),
       flushCallback_(*this),
       destinationMap_(std::make_unique<ProxyDestinationMap>(this)) {
+  eventBase_.runInEventBaseThread([]() { isProxyThread_ = true; });
   // Setup a full random seed sequence
   folly::Random::seed(randomGenerator_);
 
   statsContainer_ = std::make_unique<ProxyStatsContainer>(*this);
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

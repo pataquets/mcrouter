@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "FifoReader.h"
 
 #include <fcntl.h>
@@ -53,8 +51,8 @@ PacketHeader parsePacketHeader(folly::IOBufQueue& bufQueue) {
   PacketHeader header;
   std::memcpy(&header, bytes.data(), sizeof(PacketHeader));
 
-  CHECK(header.packetSize() <= kFifoMaxPacketSize) << "Packet too large: "
-                                                   << header.packetSize();
+  CHECK(header.packetSize() <= kFifoMaxPacketSize)
+      << "Packet too large: " << header.packetSize();
 
   return header;
 }
@@ -123,7 +121,7 @@ void FifoReadCallback::readDataAvailable(size_t len) noexcept {
       forwardMessage(
           pendingHeader_.value(),
           readBuffer_.split(pendingHeader_->packetSize()));
-      pendingHeader_.clear();
+      pendingHeader_.reset();
     }
 
     while (readBuffer_.chainLength() >= kHeaderMagicSize) {
@@ -226,10 +224,11 @@ std::vector<std::string> FifoReaderManager::getMatchedFiles() const {
           continue;
         }
         auto& path = it->path();
-        if (!filenamePattern_ || boost::regex_search(
-                                     path.filename().string(),
-                                     *filenamePattern_,
-                                     boost::regex_constants::match_default)) {
+        if (!filenamePattern_ ||
+            boost::regex_search(
+                path.filename().string(),
+                *filenamePattern_,
+                boost::regex_constants::match_default)) {
           fifos.emplace_back(path.string());
         }
       }
@@ -250,7 +249,7 @@ void FifoReaderManager::runScanDirectory() {
     auto fd = ::open(fifo.c_str(), O_RDONLY | O_NONBLOCK);
     if (fd >= 0) {
       auto pipeReader = folly::AsyncPipeReader::UniquePtr(
-          new folly::AsyncPipeReader(&evb_, fd));
+          new folly::AsyncPipeReader(&evb_, folly::NetworkSocket::fromFd(fd)));
       auto callback = std::make_unique<FifoReadCallback>(fifo, messageReady_);
       pipeReader->setReadCB(callback.get());
       fifoReaders_.emplace(
@@ -270,5 +269,5 @@ void FifoReaderManager::unregisterCallbacks() {
   }
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

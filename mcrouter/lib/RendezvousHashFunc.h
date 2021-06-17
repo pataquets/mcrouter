@@ -1,15 +1,22 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
+#include <queue>
+#include <vector>
+
+#include <glog/logging.h>
+
 #include <folly/Range.h>
+#include <folly/dynamic.h>
+
+#include "mcrouter/lib/HashFunctionType.h"
+#include "mcrouter/lib/RendezvousHashHelper.h"
 
 namespace facebook {
 namespace memcache {
@@ -26,12 +33,26 @@ class RendezvousHashFunc {
   /**
    * @param endpoints  A list of backend servers
    */
-  explicit RendezvousHashFunc(std::vector<folly::StringPiece> endpoints);
+  RendezvousHashFunc(
+      const std::vector<folly::StringPiece>& endpoints,
+      const folly::dynamic& json);
 
-  size_t operator()(folly::StringPiece key) const;
+  size_t operator()(folly::StringPiece key) const {
+    return *begin(key);
+  }
+
+  RendezvousIterator begin(folly::StringPiece key) const;
+
+  RendezvousIterator end() const {
+    return RendezvousIterator();
+  }
 
   static const char* type() {
     return "Rendezvous";
+  }
+
+  static HashFunctionType typeId() {
+    return HashFunctionType::Rendezvous;
   }
 
  private:

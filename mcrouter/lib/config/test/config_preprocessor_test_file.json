@@ -3,12 +3,12 @@
     "macros": {
       "s": {
         "type": "macroDef",
-        "result": "string",
+        "result": "string"
       },
       "sParam": {
         "type": "macroDef",
         "params": [ "a" ],
-        "result": "%a%",
+        "result": "%a%"
       }
     },
     "cases": {
@@ -44,7 +44,7 @@
       },
       "range": {
         "orig": "@range( @int(-1), @int(5) )",
-        "expand": [ -1, 0, 1, 2, 3, 4, 5, ]
+        "expand": [ -1, 0, 1, 2, 3, 4, 5 ]
       },
       "booleans": {
         "orig": "@and(@not(@or(@bool(false),@bool(1))), @not(@bool(false)))",
@@ -203,8 +203,7 @@
         "expand": "123"
       },
       "multiline_call": {
-        "orig": "@concat(hello,
-                         world)",
+        "orig": "@concat(hello, world)",
         "expand": "helloworld"
       }
     }
@@ -390,7 +389,7 @@
       "selectNoDefaultStr": {
         "orig": "@select(%my-dict%, a)",
         "expand": "b"
-      },
+      }
     }
   },
   "weightedHash": {
@@ -467,9 +466,9 @@
       "empty": {
         "orig": {
           "type": "shuffle",
-          "dictionary": { }
+          "dictionary": [ ]
         },
-        "expand": { }
+        "expand": [ ]
       },
       "one": {
         "orig": {
@@ -477,6 +476,38 @@
           "dictionary": [ 1 ]
         },
         "expand": [ 1 ]
+      },
+      "withSeed1": {
+        "orig": {
+          "type": "shuffle",
+          "dictionary": [ 1, 3 ],
+          "seed": 11111111
+        },
+        "expand": [ 1, 3 ]
+      },
+      "withSeed2": {
+        "orig": {
+          "type": "shuffle",
+          "dictionary": [ 1, 3 ],
+          "seed": 123
+        },
+        "expand": [ 3, 1 ]
+      },
+      "withSeed1again": {
+        "orig": {
+          "type": "shuffle",
+          "dictionary": [ 1, 3 ],
+          "seed": 11111111
+        },
+        "expand": [ 1, 3 ]
+      },
+      "withSeed2again": {
+        "orig": {
+          "type": "shuffle",
+          "dictionary": [ 1, 3 ],
+          "seed": 123
+        },
+        "expand": [ 3, 1 ]
       }
     }
   },
@@ -504,7 +535,7 @@
       "out_of_range2": {
         "orig": "@slice(abcd, @int(-10), @int(10000))",
         "expand": "abcd"
-      },
+      }
     }
   },
   "set": {
@@ -718,7 +749,7 @@
               "b": {
                 "type": "constDef",
                 "result": "%a%b"
-              },
+              }
             },
             {
               "c": {
@@ -862,6 +893,144 @@
       }
     }
   },
+  "bitwise": {
+    "macros": {
+      "set-msb": {
+        "type": "constDef",
+        "result": -9223372036854775808
+      },
+      "allones": {
+        "type": "constDef",
+        "result": -1
+      },
+      "allones-but-msb": {
+        "type": "constDef",
+        "result": 9223372036854775807
+      },
+      "allones-but-lsb": {
+        "type": "constDef",
+        "result": -2
+      }
+    },
+    "cases": {
+      "0&0": {
+        "orig": "@bitwiseAnd(@int(0), @int(0))",
+        "expand": 0
+      },
+      "0&1": {
+        "orig": "@bitwiseAnd(@int(0), @int(1))",
+        "expand": 0
+      },
+      "1&1": {
+        "orig": "@bitwiseAnd(@int(1), @int(1))",
+        "expand": 1
+      },
+      "1&15": {
+        "orig": "@bitwiseAnd(@int(1), @int(15))",
+        "expand": 1
+      },
+      "lsb&all": {
+        "orig": "@bitwiseAnd(@int(1), %allones%)",
+        "expand": 1
+      },
+      "msb&all": {
+        "orig": "@equals(@bitwiseAnd(%set-msb%, %allones%), @int(%set-msb%))",
+        "expand": true
+      },
+      "0|0": {
+        "orig": "@bitwiseOr(@int(0), @int(0))",
+        "expand": 0
+      },
+      "0|1": {
+        "orig": "@bitwiseOr(@int(0), @int(1))",
+        "expand": 1
+      },
+      "1|1": {
+        "orig": "@bitwiseOr(@int(1), @int(1))",
+        "expand": 1
+      },
+      "1|2": {
+        "orig": "@bitwiseOr(@int(1), @int(2))",
+        "expand": 3
+      },
+      "lsb|all": {
+        "orig": "@bitwiseOr(@int(1), %allones%)",
+        "expand": -1
+      },
+      "msb|all": {
+        "orig": "@bitwiseOr(%set-msb%, %allones%)",
+        "expand": -1
+      },
+      "0^0": {
+        "orig": "@bitwiseXor(@int(0), @int(0))",
+        "expand": 0
+      },
+      "0^1": {
+        "orig": "@bitwiseXor(@int(0), @int(1))",
+        "expand": 1
+      },
+      "1^1": {
+        "orig": "@bitwiseXor(@int(1), @int(1))",
+        "expand": 0
+      },
+      "1^2": {
+        "orig": "@bitwiseXor(@int(1), @int(2))",
+        "expand": 3
+      },
+      "lsb^all": {
+        "orig": "@equals(@bitwiseXor(@int(1), %allones%), @int(%allones-but-lsb%))",
+        "expand": true
+      },
+      "msb^all": {
+        "orig": "@equals(@bitwiseXor(%set-msb%, %allones%), @int(%allones-but-msb%))",
+        "expand": true
+      },
+      "~allones": {
+        "orig": "@bitwiseNot(%allones%)",
+        "expand": 0
+      },
+      "~allones-but-lsb": {
+        "orig": "@bitwiseNot(%allones-but-lsb%)",
+        "expand": 1
+      },
+      "~allones-but-msb": {
+        "orig": "@equals(@bitwiseNot(%allones-but-msb%), @int(%set-msb%))",
+        "expand": true
+      },
+      "1<<4": {
+        "orig": "@bitwiseLeftShift(@int(1), @int(4))",
+        "expand": 16
+      },
+      "16>>4": {
+        "orig": "@bitwiseRightShift(@int(16), @int(4))",
+        "expand": 1
+      },
+      "1<<63": {
+        "orig": "@equals(@bitwiseLeftShift(@int(1), @int(63)), %set-msb%)",
+        "expand": true
+      },
+      "msb>>63": {
+        "orig": "@bitwiseRightShift(%set-msb%, @int(63))",
+        "expand": 1
+      },
+      "msb<<1": {
+        "orig": "@bitwiseLeftShift(%set-msb%, @int(1))",
+        "expand": 0
+      },
+      "1>>1": {
+        "orig": "@bitwiseRightShift(@int(1), @int(1))",
+        "expand": 0
+      },
+      "allones-but-lsb>>1": {
+        "orig": "@equals(@bitwiseRightShift(%allones-but-lsb%, @int(1)), %allones-but-msb%)",
+        "expand": true
+      },
+      "allones-but-msb<<1": {
+        "orig": "@equals(@bitwiseLeftShift(%allones-but-msb%, @int(1)), %allones-but-lsb%)",
+        "expand": true
+      }
+    }
+  },
   "math": {
     "macros": {
       "factorial": {
@@ -928,8 +1097,8 @@
       "notContainsList": {
         "orig": {
           "type": "contains",
-          "dictionary": [ 0, 1, 2, 3, ],
-          "key": 5,
+          "dictionary": [ 0, 1, 2, 3 ],
+          "key": 5
         },
         "expand": false
       },
@@ -944,8 +1113,8 @@
       "notContainsObj": {
         "orig": {
           "type": "contains",
-          "dictionary": { "a": 1, "b": 2, },
-          "key": "c",
+          "dictionary": { "a": 1, "b": 2 },
+          "key": "c"
         },
         "expand": false
       }
@@ -983,7 +1152,7 @@
           },
           {
             "type": "foreach",
-            "from": [ 1, 2, 3, 4, 5, 6, ],
+            "from": [ 1, 2, 3, 4, 5, 6 ],
             "where": "@equals(@mod(%item%, @int(2)), @int(0))",
             "top": 2,
             "use": {
@@ -1007,7 +1176,7 @@
             "key": "k",
             "item": "v",
             "from": { "a": "b", "d": "c", "z": "\\@a" },
-            "where": "@less(%v%, %k%)",
+            "where": "@less(%v%, %k%)"
           },
           {
             "type": "foreach",
@@ -1245,7 +1414,7 @@
           "outside_macro": {
             "a": "@defined(a)",
             "local": "@defined(local)",
-            "myMacro": "@defined(myMacro)",
+            "myMacro": "@defined(myMacro)"
           }
         },
         "expand": {

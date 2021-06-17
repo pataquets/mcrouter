@@ -1,16 +1,15 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "AccessPoint.h"
 
 #include <folly/Conv.h>
 #include <folly/IPAddress.h>
+#include <folly/IPAddressException.h>
 
 #include "mcrouter/lib/fbi/cpp/util.h"
 
@@ -44,15 +43,6 @@ void parseParts(folly::StringPiece s, folly::StringPiece& out, Args&... args) {
   }
 }
 
-bool parseSsl(folly::StringPiece s) {
-  if (s == "ssl") {
-    return true;
-  } else if (s == "plain") {
-    return false;
-  }
-  throw std::runtime_error("Invalid encryption");
-}
-
 bool parseCompressed(folly::StringPiece s) {
   if (s == "compressed") {
     return true;
@@ -67,43 +57,64 @@ mc_protocol_t parseProtocol(folly::StringPiece str) {
     return mc_ascii_protocol;
   } else if (str == "caret") {
     return mc_caret_protocol;
-  } else if (str == "umbrella") {
-    return mc_umbrella_protocol_DONOTUSE;
+  } else if (str == "thrift") {
+    return mc_thrift_protocol;
   }
   throw std::runtime_error("Invalid protocol");
 }
 
-} // anonymous
+} // namespace
 
 AccessPoint::AccessPoint(
     folly::StringPiece host,
     uint16_t port,
     mc_protocol_t protocol,
-    bool useSsl,
+    SecurityMech mech,
     bool compressed,
-    bool unixDomainSocket)
+    bool unixDomainSocket,
+    uint32_t failureDomain)
     : port_(port),
       protocol_(protocol),
-      useSsl_(useSsl),
+      securityMech_(mech),
       compressed_(compressed),
-      unixDomainSocket_(unixDomainSocket) {
+      unixDomainSocket_(unixDomainSocket),
+      failureDomain_(failureDomain) {
   try {
     folly::IPAddress ip(host);
     host_ = ip.toFullyQualified();
+    hash_ = folly::hash_value(ip);
     isV6_ = ip.isV6();
-  } catch (const folly::IPAddressFormatException& e) {
+  } catch (const folly::IPAddressFormatException&) {
     // host is not an IP address (e.g. 'localhost')
     host_ = host.str();
     isV6_ = false;
   }
 }
 
+AccessPoint::AccessPoint(
+    const folly::IPAddress& ip,
+    uint16_t port,
+    uint32_t failureDomain,
+    mc_protocol_t protocol)
+    : port_(port), protocol_(protocol), failureDomain_(failureDomain) {
+  host_ = ip.toFullyQualified();
+  hash_ = folly::hash_value(ip);
+  isV6_ = ip.isV6();
+}
+
+AccessPoint::AccessPoint(
+    HostOnlyTag,
+    const folly::IPAddress& addr,
+    mc_protocol_t protocol)
+    : host_(addr.toFullyQualified()), port_(0), protocol_(protocol) {}
+
 std::shared_ptr<AccessPoint> AccessPoint::create(
     folly::StringPiece apString,
     mc_protocol_t defaultProtocol,
-    bool defaultUseSsl,
+    SecurityMech defaultMech,
     uint16_t portOverride,
-    bool defaultCompressed) {
+    bool defaultCompressed,
+    uint32_t failureDomain) {
   if (apString.empty()) {
     return nullptr;
   }
@@ -144,7 +155,7 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
       port = "0";
       parseParts(apString, protocol, encr, comp);
       // Unix Domain Sockets with SSL is not supported.
-      if (!encr.empty() && parseSsl(encr)) {
+      if (!encr.empty() && parseSecurityMech(encr) != SecurityMech::NONE) {
         return nullptr;
       }
     } else {
@@ -155,9 +166,10 @@ std::shared_ptr<AccessPoint> AccessPoint::create(
         host,
         portOverride != 0 ? portOverride : folly::to<uint16_t>(port),
         protocol.empty() ? defaultProtocol : parseProtocol(protocol),
-        encr.empty() ? defaultUseSsl : parseSsl(encr),
+        encr.empty() ? defaultMech : parseSecurityMech(encr),
         comp.empty() ? defaultCompressed : parseCompressed(comp),
-        unixDomainSocket);
+        unixDomainSocket,
+        failureDomain);
   } catch (const std::exception&) {
     return nullptr;
   }
@@ -185,7 +197,7 @@ std::string AccessPoint::toString() const {
         ":",
         mc_protocol_to_string(protocol_),
         ":",
-        useSsl_ ? "ssl" : "plain",
+        securityMechToString(securityMech_),
         ":",
         compressed_ ? "compressed" : "notcompressed");
   }
@@ -196,10 +208,10 @@ std::string AccessPoint::toString() const {
       ":",
       mc_protocol_to_string(protocol_),
       ":",
-      useSsl_ ? "ssl" : "plain",
+      securityMechToString(securityMech_),
       ":",
       compressed_ ? "compressed" : "notcompressed");
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

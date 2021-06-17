@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "util.h"
 
 #include <assert.h>
@@ -90,7 +88,7 @@ bool writeToFile(
   }
   return written >= 0 && size_t(written) == contents.size();
 }
-} // anonymous
+} // namespace
 
 bool writeStringToFile(folly::StringPiece contents, const std::string& path) {
   return writeToFile(contents, path, O_CREAT | O_WRONLY | O_TRUNC);
@@ -129,9 +127,9 @@ bool atomicallyWriteFileToDisk(
 
     boost::filesystem::rename(tempFilePath, filePath);
     return true;
-  } catch (const boost::filesystem::filesystem_error& e) {
+  } catch (const boost::filesystem::filesystem_error&) {
     return false;
-  } catch (const boost::system::system_error& e) {
+  } catch (const boost::system::system_error&) {
     return false;
   }
 }
@@ -162,12 +160,16 @@ std::string getThreadName() {
   return "unknown";
 }
 
+// TODO make this return a class containing folly::dynamic and
+// folly::json::metadata_map as suggested by Andre in the comments of
+// D15286671
 folly::dynamic parseJsonString(
     folly::StringPiece s,
+    folly::json::metadata_map* metadataMap,
     bool allow_trailing_comma) {
   folly::json::serialization_opts opts;
   opts.allow_trailing_comma = allow_trailing_comma;
-  return folly::parseJson(s, opts);
+  return folly::parseJsonWithMetadata(s, opts, metadataMap);
 }
 
 std::string shorten(folly::StringPiece s, size_t maxLength) {
@@ -220,5 +222,5 @@ bool ensureHasPermission(const std::string& path, mode_t mode) {
 
   return true;
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

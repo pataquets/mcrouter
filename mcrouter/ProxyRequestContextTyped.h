@@ -1,13 +1,13 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
+
+#include <folly/Utility.h>
 
 #include "mcrouter/ProxyRequestContext.h"
 #include "mcrouter/ProxyRequestLogger.h"
@@ -40,7 +40,7 @@ struct RouterAdditionalLogger<
   using type = typename RouterInfo::AdditionalLogger;
 };
 
-} // detail
+} // namespace detail
 
 template <class RouterInfo>
 class ProxyRequestContextWithInfo : public ProxyRequestContext {
@@ -91,10 +91,48 @@ class ProxyRequestContextWithInfo : public ProxyRequestContext {
   }
 
   ~ProxyRequestContextWithInfo() override {
+    if (auto poolStats = proxy_.stats().getPoolStats(poolStatIndex_)) {
+      poolStats->incrementFinalResultErrorCount(
+          isErrorResult(finalResult_) ? 1 : 0);
+      poolStats->addTotalDurationSample(nowUs() - startDurationUs_);
+    }
     if (reqComplete_) {
       fiber_local<RouterInfo>::runWithoutLocals(
           [this]() { reqComplete_(*this); });
     }
+  }
+
+  /**
+   * Called before a request is sent
+   */
+  template <class Request>
+  void onBeforeRequestSent(
+      const folly::StringPiece poolName,
+      const AccessPoint& ap,
+      folly::StringPiece strippedRoutingPrefix,
+      const Request& request,
+      RequestClass requestClass,
+      const int64_t startTimeUs,
+      const RequestLoggerContextFlags flags = RequestLoggerContextFlags::NONE) {
+    if (recording()) {
+      return;
+    }
+
+    RpcStatsContext rpcStatsContext;
+    RequestLoggerContext loggerContext(
+        poolName,
+        ap,
+        strippedRoutingPrefix,
+        requestClass,
+        startTimeUs,
+        /* endTimeUs */ 0,
+        carbon::Result::UNKNOWN,
+        rpcStatsContext,
+        /* networkTransportTimeUs */ 0,
+        {},
+        flags);
+    assert(additionalLogger_.hasValue());
+    additionalLogger_->logBeforeRequestSent(request, loggerContext);
   }
 
   /**
@@ -110,11 +148,19 @@ class ProxyRequestContextWithInfo : public ProxyRequestContext {
       RequestClass requestClass,
       const int64_t startTimeUs,
       const int64_t endTimeUs,
-      const ReplyStatsContext replyStatsContext) {
+      const int32_t poolStatIndex,
+      const RpcStatsContext rpcStatsContext,
+      const int64_t networkTransportTimeUs,
+      const std::vector<ExtraDataCallbackT>& extraDataCallbacks,
+      const RequestLoggerContextFlags flags = RequestLoggerContextFlags::NONE) {
     if (recording()) {
       return;
     }
 
+    if (auto poolStats = proxy_.stats().getPoolStats(poolStatIndex)) {
+      poolStats->incrementRequestCount(1);
+      poolStats->addDurationSample(endTimeUs - startTimeUs);
+    }
     RequestLoggerContext loggerContext(
         poolName,
         ap,
@@ -122,17 +168,36 @@ class ProxyRequestContextWithInfo : public ProxyRequestContext {
         requestClass,
         startTimeUs,
         endTimeUs,
-        reply.result(),
-        replyStatsContext);
+        *reply.result_ref(),
+        rpcStatsContext,
+        networkTransportTimeUs,
+        extraDataCallbacks,
+        flags);
     assert(logger_.hasValue());
     logger_->template log<Request>(loggerContext);
     assert(additionalLogger_.hasValue());
     additionalLogger_->log(request, reply, loggerContext);
   }
 
- private:
+  bool mayLog(
+      uint32_t routingKeyHash,
+      const RequestClass& reqClass,
+      const carbon::Result& replyResult,
+      const int64_t durationUs) const {
+    return additionalLogger_->mayLog(
+        routingKeyHash, reqClass, replyResult, durationUs);
+  }
+
+ public:
+  Proxy<RouterInfo>& proxyWithRouterInfo() const {
+    return proxy_;
+  }
+
   using AdditionalLogger =
       typename detail::RouterAdditionalLogger<RouterInfo>::type;
+  AdditionalLogger& additionalLogger() {
+    return *additionalLogger_;
+  }
 
  protected:
   ProxyRequestContextWithInfo(
@@ -140,8 +205,8 @@ class ProxyRequestContextWithInfo : public ProxyRequestContext {
       ProxyRequestPriority priority__)
       : ProxyRequestContext(pr, priority__),
         proxy_(pr),
-        logger_(ProxyRequestLogger<RouterInfo>(pr)),
-        additionalLogger_(AdditionalLogger(*this)) {}
+        logger_(folly::in_place, pr),
+        additionalLogger_(folly::in_place, *this) {}
 
   Proxy<RouterInfo>& proxy_;
 
@@ -160,6 +225,7 @@ class ProxyRequestContextWithInfo : public ProxyRequestContext {
 
   folly::Optional<ProxyRequestLogger<RouterInfo>> logger_;
   folly::Optional<AdditionalLogger> additionalLogger_;
+  int64_t startDurationUs_{nowUs()};
 };
 
 template <class RouterInfo, class Request>
@@ -180,9 +246,9 @@ class ProxyRequestContextTyped
    *
    * WARNING: This function can be dangerous with new typed requests.
    * For typed requests,
-   *   ctx->sendReply(mc_res_local_error, "Error message")
+   *   ctx->sendReply(carbon::Result::LOCAL_ERROR, "Error message")
    * does the right thing, while
-   *   ctx->sendReply(mc_res_found, "value")
+   *   ctx->sendReply(carbon::Result::FOUND, "value")
    * does the wrong thing.
    */
   template <class... Args>
@@ -217,8 +283,7 @@ class ProxyRequestContextTyped
       Proxy<RouterInfo>& pr,
       const Request& req,
       ProxyRequestPriority priority__)
-      : ProxyRequestContextWithInfo<RouterInfo>(pr, priority__),
-        req_(&req) {}
+      : ProxyRequestContextWithInfo<RouterInfo>(pr, priority__), req_(&req) {}
 
   std::shared_ptr<const ProxyConfig<RouterInfo>> config_;
 
@@ -243,8 +308,8 @@ createProxyRequestContext(
     F&& f,
     ProxyRequestPriority priority = ProxyRequestPriority::kCritical);
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ProxyRequestContextTyped-inl.h"

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <type_traits>
@@ -117,8 +115,8 @@ static_assert(
         List<A, B, C, D, E, F, G, H>,
         SortT<List<E, B, G, C, D, H, F, A>>>::value,
     "SortT is broken");
-} // type_list_sort_test
-} // detail
+} // namespace type_list_sort_test
+} // namespace detail
 
 /* Expand implementation */
 template <int Start, class MessageList>
@@ -160,6 +158,6 @@ static_assert(
         PairListSecondT<List<Pair<int, double>, Pair<float, char>>>,
         List<double, char>>::value,
     "PairListSecond list is broken");
-}
-}
-} // facebook::memcache::detail
+} // namespace detail
+} // namespace memcache
+} // namespace facebook

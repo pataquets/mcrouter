@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -19,7 +17,7 @@
 #include <folly/fibers/WhenN.h>
 
 #include "mcrouter/lib/McResUtil.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/config/RouteHandleFactory.h"
@@ -53,16 +51,21 @@ class MigrateRoute {
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
     auto mask = routeMask(tp_(), req);
     if (mask & kFromMask) {
-      t(*from_, req);
+      if (t(*from_, req)) {
+        return true;
+      }
     }
     if (mask & kToMask) {
-      t(*to_, req);
+      if (t(*to_, req)) {
+        return true;
+      }
     }
+    return false;
   }
 
   MigrateRoute(
@@ -89,19 +92,19 @@ class MigrateRoute {
       case kToMask:
       default:
         McLeaseSetReply reply = to_->route(req);
-        if (reply.result() != mc_res_stored &&
+        if (*reply.result_ref() != carbon::Result::STORED &&
             now < (migrationTime(req) + 10)) {
           // Send a lease invalidation to from_ if the lease-set failed and we
           // recently migrated to to_. This helps ensure that servers in the old
           // pool don't accumulate unfulfilled lease tokens.
           auto leaseInvalidation =
-              std::make_unique<McLeaseSetRequest>(req.key().fullKey());
-          leaseInvalidation->exptime() = -1;
-          leaseInvalidation->leaseToken() = req.leaseToken();
-          folly::fibers::addTask([
-            rh = from_,
-            leaseInvalidation = std::move(leaseInvalidation)
-          ]() { rh->route(*leaseInvalidation); });
+              std::make_unique<McLeaseSetRequest>(req.key_ref()->fullKey());
+          leaseInvalidation->exptime_ref() = -1;
+          leaseInvalidation->leaseToken_ref() = *req.leaseToken_ref();
+          folly::fibers::addTask(
+              [rh = from_, leaseInvalidation = std::move(leaseInvalidation)]() {
+                rh->route(*leaseInvalidation);
+              });
         }
         return reply;
     }
@@ -129,7 +132,8 @@ class MigrateRoute {
 
         folly::Optional<Reply> reply;
         folly::fibers::forEach(fs, fs + 2, [&reply](size_t, Reply newReply) {
-          if (!reply || worseThan(newReply.result(), reply.value().result())) {
+          if (!reply ||
+              worseThan(*newReply.result_ref(), *reply.value().result_ref())) {
             reply = std::move(newReply);
           }
         });
@@ -179,8 +183,8 @@ class MigrateRoute {
   template <class Request>
   time_t migrationTime(const Request& req) const {
     return startTimeSec_ + intervalSec_ +
-        req.key().routingKeyHash() % intervalSec_;
+        req.key_ref()->routingKeyHash() % intervalSec_;
   }
 };
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

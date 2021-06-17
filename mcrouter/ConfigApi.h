@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <atomic>
@@ -22,7 +20,8 @@
 
 namespace folly {
 struct dynamic;
-} // folly
+class Executor;
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -40,6 +39,7 @@ class ConfigApi : public ConfigApiIf {
  public:
   typedef std::function<void()> Callback;
   typedef CallbackPool<>::CallbackHandle CallbackHandle;
+  struct PartialUpdate;
 
   static const char* const kFilePrefix;
 
@@ -60,6 +60,10 @@ class ConfigApi : public ConfigApiIf {
    */
   bool get(ConfigType type, const std::string& path, std::string& contents)
       override;
+
+  bool partialReconfigurableSource(
+      const std::string& configPath,
+      std::string& path) override;
 
   /**
    * All files we 'get' after this call will be marked as 'tracked'. Once
@@ -99,9 +103,25 @@ class ConfigApi : public ConfigApiIf {
   virtual void startObserving();
 
   /**
+   * Allow disabling of security config parsing
+   */
+  virtual bool enableSecurityConfig() const {
+    return true;
+  }
+
+  virtual std::string getFailureDomainStr(uint32_t /* unused */) const {
+    return "";
+  }
+
+  /**
    * Stops observing for file changes
    */
   virtual void stopObserving(pid_t pid) noexcept;
+
+  virtual std::vector<PartialUpdate> releasePartialUpdatesLocked();
+
+  virtual bool updatePartialConfigSource(std::vector<PartialUpdate> updates);
+  virtual void addPartialUpdateForTest(PartialUpdate& update);
 
   ~ConfigApi() override;
 
@@ -117,6 +137,17 @@ class ConfigApi : public ConfigApiIf {
    *                      other than the first.
    */
   void enableReadingFromBackupFiles();
+
+  struct PartialUpdate {
+    std::string tierName;
+    std::string oldApString;
+    std::string newApString;
+    uint32_t oldFailureDomain;
+    uint32_t newFailureDomain;
+    int64_t version;
+    std::string hostname;
+    int64_t serviceId;
+  };
 
  protected:
   const McrouterOptions& opts_;
@@ -147,7 +178,7 @@ class ConfigApi : public ConfigApiIf {
   void dumpConfigSourceToDisk(
       const std::string& sourcePrefix,
       const std::string& name,
-      const std::string& contents,
+      std::string contents,
       const std::string& md5OrVersion);
 
   /**
@@ -198,14 +229,13 @@ class ConfigApi : public ConfigApiIf {
 
   bool isFirstConfig_{true};
 
-  const bool dumpConfigToDisk_{false};
+  std::unique_ptr<folly::Executor> dumpConfigToDiskExecutor_;
   bool readFromBackupFiles_{false};
-  bool lastConfigFromBackupFiles_{false};
 
   void configThreadRun();
 
   bool readFile(const std::string& path, std::string& contents);
 };
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

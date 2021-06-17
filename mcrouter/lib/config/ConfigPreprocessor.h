@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <functional>
@@ -16,6 +14,7 @@
 
 #include <folly/dynamic.h>
 #include <folly/experimental/StringKeyedUnorderedMap.h>
+#include <folly/json.h>
 
 namespace facebook {
 namespace memcache {
@@ -35,6 +34,7 @@ class ConfigPreprocessor {
    * @param importResolver resolves @import macros
    * @param globalParams parameters available in all macros. Should not have
    *                     macros.
+   * @param configMetadataMap config metadata map containing linenumbers, etc
    * @param nestedLimit maximum number of nested macros/objects.
    *
    * @return JSON without macros
@@ -44,6 +44,7 @@ class ConfigPreprocessor {
       folly::StringPiece jsonC,
       ImportResolverIf& importResolver,
       folly::StringKeyedUnorderedMap<folly::dynamic> globalParams,
+      folly::json::metadata_map* configMetadataMap,
       size_t nestedLimit = 250);
 
  private:
@@ -74,6 +75,8 @@ class ConfigPreprocessor {
       std::function<folly::dynamic(folly::dynamic&&, const Context&)>>
       builtInCalls_;
 
+  folly::json::metadata_map& configMetadataMap_;
+
   mutable size_t nestedLimit_;
 
   /**
@@ -82,11 +85,13 @@ class ConfigPreprocessor {
    * @param importResolver resolves @import macros
    * @param globals parameters available in all macros. Should not have
    *                macros.
+   * @param configMetadataMap config metadata map containing linenumbers, etc
    * @param nestedLimit maximum number of nested macros/objects.
    */
   ConfigPreprocessor(
       ImportResolverIf& importResolver,
       folly::StringKeyedUnorderedMap<folly::dynamic> globals,
+      folly::json::metadata_map& configMetadataMap,
       size_t nestedLimit);
 
   /**
@@ -136,5 +141,5 @@ class ConfigPreprocessor {
 
   void addConst(folly::StringPiece name, folly::dynamic result);
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

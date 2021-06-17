@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "ConnectionTracker.h"
 
 namespace facebook {
@@ -17,9 +15,10 @@ ConnectionTracker::ConnectionTracker(size_t maxConns) : maxConns_(maxConns) {}
 McServerSession& ConnectionTracker::add(
     folly::AsyncTransportWrapper::UniquePtr transport,
     std::shared_ptr<McServerOnRequest> cb,
-    AsyncMcServerWorkerOptions options,
+    const AsyncMcServerWorkerOptions& options,
     void* userCtxt,
-    const CompressionCodecMap* compressionCodecMap) {
+    const CompressionCodecMap* compressionCodecMap,
+    McServerSession::KeepAlive keepAlive) {
   if (maxConns_ != 0 && sessions_.size() >= maxConns_) {
     evict();
   }
@@ -28,11 +27,11 @@ McServerSession& ConnectionTracker::add(
       std::move(transport),
       std::move(cb),
       *this,
-      std::move(options),
+      options,
       userCtxt,
-      compressionCodecMap);
-
-  sessions_.push_front(session);
+      &sessions_,
+      compressionCodecMap,
+      std::move(keepAlive));
 
   return session;
 }
@@ -58,10 +57,9 @@ bool ConnectionTracker::writesPending() const {
 }
 
 void ConnectionTracker::touch(McServerSession& session) {
-  static uint64_t numCalls = 0;
   // Find the connection and bring it to the front of the LRU.
   // Do it only once in 16 requests because it's still expensive.
-  if (((numCalls++) & 15) || !session.isLinked()) {
+  if (((numCalls_++) & 15) || !session.isLinked()) {
     return;
   }
   sessions_.erase(sessions_.iterator_to(session));
@@ -74,6 +72,12 @@ void ConnectionTracker::evict() {
   }
   auto& session = sessions_.back();
   session.close();
+}
+
+void ConnectionTracker::onAccepted(McServerSession& session) {
+  if (onAccepted_) {
+    onAccepted_(session);
+  }
 }
 
 void ConnectionTracker::onWriteQuiescence(McServerSession& session) {
@@ -89,9 +93,11 @@ void ConnectionTracker::onCloseStart(McServerSession& session) {
   }
 }
 
-void ConnectionTracker::onCloseFinish(McServerSession& session) {
+void ConnectionTracker::onCloseFinish(
+    McServerSession& session,
+    bool onAcceptedCalled) {
   if (onCloseFinish_) {
-    onCloseFinish_(session);
+    onCloseFinish_(session, onAcceptedCalled);
   }
   if (session.isLinked()) {
     sessions_.erase(sessions_.iterator_to(session));
@@ -104,5 +110,5 @@ void ConnectionTracker::onShutdown() {
   }
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

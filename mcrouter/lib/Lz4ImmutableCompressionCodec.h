@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include "mcrouter/lib/Compression.h"
@@ -35,5 +33,5 @@ class Lz4ImmutableCompressionCodec : public CompressionCodec {
   Lz4Immutable codec_;
 };
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

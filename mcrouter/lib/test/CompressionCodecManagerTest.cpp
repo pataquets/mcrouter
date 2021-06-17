@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -337,6 +335,6 @@ TEST(CompressionCodecManager, getBest_serverWithoutCodecs) {
           CodecIdRange{1, 6}, 1234 /* body size */, 0 /* reply type id */));
 }
 
-} // test
-} // memcache
-} // facebook
+} // namespace test
+} // namespace memcache
+} // namespace facebook

@@ -1,15 +1,15 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "Util.h"
 
 #include <memory>
+
+#include <glog/logging.h>
 
 #include <folly/Format.h>
 
@@ -103,8 +103,7 @@ std::unique_ptr<boost::regex> buildRegex(
     bool ignoreCase) noexcept {
   if (!pattern.empty()) {
     try {
-      return std::make_unique<boost::regex>(
-          pattern, getRegexFlags(ignoreCase));
+      return std::make_unique<boost::regex>(pattern, getRegexFlags(ignoreCase));
     } catch (const std::exception& e) {
       LOG(ERROR) << folly::sformat("Invalid pattern ({}) provided: ", pattern)
                  << e.what();
@@ -114,5 +113,5 @@ std::unique_ptr<boost::regex> buildRegex(
   return nullptr;
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

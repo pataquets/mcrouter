@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
@@ -15,13 +13,12 @@
 
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/mc/protocol.h"
-#include "mcrouter/lib/mc/umbrella.h"
 #include "mcrouter/lib/network/AsciiSerialized.h"
 #include "mcrouter/lib/network/CaretSerializedMessage.h"
 #include "mcrouter/lib/network/McServerRequestContext.h"
-#include "mcrouter/lib/network/UmbrellaProtocol.h"
 #include "mcrouter/lib/network/UniqueIntrusiveList.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
+#include "mcrouter/lib/network/gen/MemcacheRoutingGroups.h"
 
 namespace facebook {
 namespace memcache {
@@ -66,7 +63,8 @@ class WriteBuffer {
       Reply&& reply,
       Destructor destructor,
       const CompressionCodecMap* compressionCodecMap,
-      const CodecIdRange& codecIdRange);
+      const CodecIdRange& codecIdRange,
+      size_t tcpZeroCopyThreshold = 0);
 
   template <class Reply>
   typename std::enable_if<
@@ -79,7 +77,8 @@ class WriteBuffer {
       Reply&& reply,
       Destructor destructor,
       const CompressionCodecMap* compressionCodecMap,
-      const CodecIdRange& codecIdRange);
+      const CodecIdRange& codecIdRange,
+      size_t tcpZeroCopyThreshold = 0);
 
   const struct iovec* getIovsBegin() const {
     return iovsBegin_;
@@ -114,13 +113,27 @@ class WriteBuffer {
     return typeId_;
   }
 
+  /* TCP Zero copy only supported for caret */
+  bool shouldApplyZeroCopy() {
+    if (protocol_ == mc_caret_protocol) {
+      return caretReply_.shouldApplyZeroCopy();
+    }
+    return false;
+  }
+
+  void setZeroCopyPendingNotifications(size_t num) {
+    zeroCopyPendingNotifications_ = num;
+  }
+  size_t decZeroCopyPendingNotifications() {
+    return --zeroCopyPendingNotifications_;
+  }
+
  private:
   const mc_protocol_t protocol_;
 
   /* Write buffers */
   union {
     AsciiSerializedReply asciiReply_;
-    UmbrellaSerializedMessage umbrellaReply_;
     CaretSerializedMessage caretReply_;
   };
 
@@ -129,6 +142,7 @@ class WriteBuffer {
   size_t iovsCount_{0};
   bool isEndOfBatch_{false};
   uint32_t typeId_{0};
+  uint32_t zeroCopyPendingNotifications_{0};
 
   WriteBuffer(const WriteBuffer&) = delete;
   WriteBuffer& operator=(const WriteBuffer&) = delete;
@@ -136,33 +150,36 @@ class WriteBuffer {
   WriteBuffer& operator=(WriteBuffer&&) = delete;
 };
 
-// The only purpose of this class is to avoid a circular #include dependency
-// between WriteBuffer.h and McServerSession.h.
-class WriteBufferIntrusiveList : public WriteBuffer::List {};
-
 class WriteBufferQueue {
  public:
-  explicit WriteBufferQueue(mc_protocol_t protocol) noexcept
-      : protocol_(protocol), tlFreeStack_(initFreeStack(protocol_)) {}
+  WriteBufferQueue() = default;
 
-  std::unique_ptr<WriteBuffer> get() {
-    if (tlFreeStack_.empty()) {
-      return std::make_unique<WriteBuffer>(protocol_);
+  std::unique_ptr<WriteBuffer> get(mc_protocol_t protocol) {
+    if (!tlFreeStack_) {
+      tlFreeStack_ = &initFreeStack(protocol);
+    }
+    assert(
+        tlFreeStack_ == &initFreeStack(protocol) &&
+        "protocol changed or called from a different thread");
+    if (tlFreeStack_->empty()) {
+      return std::make_unique<WriteBuffer>(protocol);
     } else {
-      return tlFreeStack_.popFront();
+      return tlFreeStack_->popFront();
     }
   }
 
   void push(std::unique_ptr<WriteBuffer> wb) {
+    assert(tlFreeStack_ && "must have been initialized");
     queue_.pushBack(std::move(wb));
   }
 
   void pop(bool popBatch) {
+    assert(tlFreeStack_ && "must have been initialized");
     bool done = false;
     do {
       assert(!empty());
-      if (tlFreeStack_.size() < kMaxFreeQueueSz) {
-        auto& wb = tlFreeStack_.pushFront(queue_.popFront());
+      if (tlFreeStack_->size() < kMaxFreeQueueSz) {
+        auto& wb = tlFreeStack_->pushFront(queue_.popFront());
         done = wb.isEndOfBatch();
         wb.clear();
       } else {
@@ -175,12 +192,37 @@ class WriteBufferQueue {
     return queue_.empty();
   }
 
+  void releaseZeroCopyChain(WriteBuffer& buf, bool batch) {
+    assert(tlFreeStack_ && "must have been initialized");
+    auto it = zeroCopyQueue_.iterator_to(buf);
+    bool done = false;
+    do {
+      assert(!zeroCopyQueue_.empty());
+      if (tlFreeStack_->size() < kMaxFreeQueueSz) {
+        auto& wb = tlFreeStack_->pushFront(
+            zeroCopyQueue_.extractAndAdvanceIterator(it));
+        done = wb.isEndOfBatch();
+        wb.clear();
+      } else {
+        done = zeroCopyQueue_.extractAndAdvanceIterator(it)->isEndOfBatch();
+      }
+    } while (!done && batch);
+  }
+
+  WriteBuffer& insertZeroCopy(std::unique_ptr<WriteBuffer> buf) {
+    return zeroCopyQueue_.pushBack(std::move(buf));
+  }
+
+  size_t zeroCopyQueueSize() const noexcept {
+    return zeroCopyQueue_.size();
+  }
+
  private:
   constexpr static size_t kMaxFreeQueueSz = 50;
 
-  mc_protocol_t protocol_;
-  WriteBuffer::List& tlFreeStack_;
+  WriteBuffer::List* tlFreeStack_{nullptr};
   WriteBuffer::List queue_;
+  WriteBuffer::List zeroCopyQueue_;
 
   static WriteBuffer::List& initFreeStack(mc_protocol_t protocol) noexcept;
 
@@ -190,7 +232,7 @@ class WriteBufferQueue {
   WriteBufferQueue& operator=(WriteBufferQueue&&) = delete;
 };
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook
 
 #include "WriteBuffer-inl.h"

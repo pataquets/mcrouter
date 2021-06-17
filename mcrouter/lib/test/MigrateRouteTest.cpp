@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <ctime>
 #include <functional>
 #include <memory>
@@ -15,7 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "mcrouter/lib/RouteHandleTraverser.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/lib/routes/MigrateRoute.h"
 #include "mcrouter/lib/test/RouteHandleTestUtil.h"
 #include "mcrouter/lib/test/TestRouteHandle.h"
@@ -36,13 +34,13 @@ TEST(migrateRouteTest, migrate) {
 
   vector<std::shared_ptr<TestHandle>> test_handles{
       make_shared<TestHandle>(
-          GetRouteTestData(mc_res_found, "a"),
+          GetRouteTestData(carbon::Result::FOUND, "a"),
           UpdateRouteTestData(),
-          DeleteRouteTestData(mc_res_deleted)),
+          DeleteRouteTestData(carbon::Result::DELETED)),
       make_shared<TestHandle>(
-          GetRouteTestData(mc_res_found, "b"),
+          GetRouteTestData(carbon::Result::FOUND, "b"),
           UpdateRouteTestData(),
-          DeleteRouteTestData(mc_res_notfound)),
+          DeleteRouteTestData(carbon::Result::NOTFOUND)),
   };
   auto route_handles = get_route_handles(test_handles);
 
@@ -50,7 +48,8 @@ TEST(migrateRouteTest, migrate) {
 
   const string key_get = "key_get";
   const string key_del = "key_del";
-  const auto hash = McGetRequest(key_get).key().routingKeyHash() % interval;
+  const auto hash =
+      McGetRequest(key_get).key_ref()->routingKeyHash() % interval;
   const time_t start_time = now + 25;
   const time_t migration_time = start_time + interval + hash;
   const time_t before_migration = start_time + 1;
@@ -88,7 +87,7 @@ TEST(migrateRouteTest, migrate) {
          EXPECT_EQ(1, cnt);
 
          auto reply_del = rh.route(req_del);
-         EXPECT_EQ(mc_res_deleted, reply_del.result());
+         EXPECT_EQ(carbon::Result::DELETED, *reply_del.result_ref());
          EXPECT_EQ(vector<string>{key_del}, test_handles[0]->saw_keys);
          EXPECT_NE(vector<string>{key_del}, test_handles[1]->saw_keys);
        },
@@ -96,13 +95,13 @@ TEST(migrateRouteTest, migrate) {
        [&]() { // case 2: start_time < now < migration_time
          vector<std::shared_ptr<TestHandle>> test_handles_2{
              make_shared<TestHandle>(
-                 GetRouteTestData(mc_res_found, "a"),
+                 GetRouteTestData(carbon::Result::FOUND, "a"),
                  UpdateRouteTestData(),
-                 DeleteRouteTestData(mc_res_deleted)),
+                 DeleteRouteTestData(carbon::Result::DELETED)),
              make_shared<TestHandle>(
-                 GetRouteTestData(mc_res_notfound, "b"),
+                 GetRouteTestData(carbon::Result::NOTFOUND, "b"),
                  UpdateRouteTestData(),
-                 DeleteRouteTestData(mc_res_notfound)),
+                 DeleteRouteTestData(carbon::Result::NOTFOUND)),
          };
          auto route_handles_c2 = get_route_handles(test_handles_2);
          TestRouteHandle<MigrateRoute<TestRouteHandleIf, TimeProviderFunc>> rh(
@@ -132,7 +131,7 @@ TEST(migrateRouteTest, migrate) {
          EXPECT_EQ(cnt, 2);
 
          auto reply_del = rh.route(req_del);
-         EXPECT_EQ(mc_res_notfound, reply_del.result());
+         EXPECT_EQ(carbon::Result::NOTFOUND, *reply_del.result_ref());
          EXPECT_EQ(vector<string>{key_del}, test_handles_2[0]->saw_keys);
          EXPECT_EQ(vector<string>{key_del}, test_handles_2[1]->saw_keys);
        },
@@ -140,13 +139,13 @@ TEST(migrateRouteTest, migrate) {
        [&]() { // case 3: migration_time < curr_time < end_time
          vector<std::shared_ptr<TestHandle>> test_handles_3{
              make_shared<TestHandle>(
-                 GetRouteTestData(mc_res_notfound, "a"),
+                 GetRouteTestData(carbon::Result::NOTFOUND, "a"),
                  UpdateRouteTestData(),
-                 DeleteRouteTestData(mc_res_notfound)),
+                 DeleteRouteTestData(carbon::Result::NOTFOUND)),
              make_shared<TestHandle>(
-                 GetRouteTestData(mc_res_found, "b"),
+                 GetRouteTestData(carbon::Result::FOUND, "b"),
                  UpdateRouteTestData(),
-                 DeleteRouteTestData(mc_res_deleted)),
+                 DeleteRouteTestData(carbon::Result::DELETED)),
          };
          auto route_handles_c3 = get_route_handles(test_handles_3);
          TestRouteHandle<MigrateRoute<TestRouteHandleIf, TimeProviderFunc>> rh(
@@ -176,7 +175,7 @@ TEST(migrateRouteTest, migrate) {
          EXPECT_EQ(2, cnt);
 
          auto reply_del = rh.route(req_del);
-         EXPECT_EQ(mc_res_notfound, reply_del.result());
+         EXPECT_EQ(carbon::Result::NOTFOUND, *reply_del.result_ref());
          EXPECT_EQ(vector<string>{key_del}, test_handles_3[0]->saw_keys);
          EXPECT_EQ(vector<string>{key_del}, test_handles_3[1]->saw_keys);
        },
@@ -207,7 +206,7 @@ TEST(migrateRouteTest, migrate) {
          EXPECT_EQ(1, cnt);
 
          auto reply_del = rh.route(req_del);
-         EXPECT_EQ(mc_res_notfound, reply_del.result());
+         EXPECT_EQ(carbon::Result::NOTFOUND, *reply_del.result_ref());
          EXPECT_NE(vector<string>{key_del}, test_handles[0]->saw_keys);
          EXPECT_EQ(vector<string>{key_del}, test_handles[1]->saw_keys);
        }});
@@ -216,13 +215,13 @@ TEST(migrateRouteTest, migrate) {
 TEST(migrateRouteTest, leases) {
   vector<std::shared_ptr<TestHandle>> test_handles{
       make_shared<TestHandle>(
-          GetRouteTestData(mc_res_found, "a"),
+          GetRouteTestData(carbon::Result::FOUND, "a"),
           UpdateRouteTestData(),
-          DeleteRouteTestData(mc_res_deleted)),
+          DeleteRouteTestData(carbon::Result::DELETED)),
       make_shared<TestHandle>(
-          GetRouteTestData(mc_res_found, "b"),
-          UpdateRouteTestData(mc_res_bad_key),
-          DeleteRouteTestData(mc_res_notfound)),
+          GetRouteTestData(carbon::Result::FOUND, "b"),
+          UpdateRouteTestData(carbon::Result::BAD_KEY),
+          DeleteRouteTestData(carbon::Result::NOTFOUND)),
   };
   auto route_handles = get_route_handles(test_handles);
 
@@ -240,8 +239,9 @@ TEST(migrateRouteTest, leases) {
     now = start_time + 1;
     McLeaseGetRequest lease_get(key);
     auto reply_get = rh.route(lease_get);
-    EXPECT_EQ(0, reply_get.leaseToken());
-    reply_get.leaseToken() = 0x1337; // Set non-zero lease token to check later.
+    EXPECT_EQ(0, *reply_get.leaseToken_ref());
+    reply_get.leaseToken_ref() =
+        0x1337; // Set non-zero lease token to check later.
     EXPECT_EQ("a", carbon::valueRangeSlow(reply_get).str());
     EXPECT_EQ(vector<string>{key}, test_handles[0]->saw_keys);
     EXPECT_EQ(vector<uint32_t>{0}, test_handles[0]->sawExptimes);
@@ -254,18 +254,18 @@ TEST(migrateRouteTest, leases) {
     {
       now = start_time + interval - 1;
       McLeaseSetRequest lease_set(key);
-      lease_set.value() = *folly::IOBuf::copyBuffer("value");
-      lease_set.exptime() = start_time + 500;
-      lease_set.leaseToken() = reply_get.leaseToken();
+      lease_set.value_ref() = *folly::IOBuf::copyBuffer("value");
+      lease_set.exptime_ref() = start_time + 500;
+      lease_set.leaseToken_ref() = *reply_get.leaseToken_ref();
       auto reply_set = rh.route(lease_set);
       EXPECT_EQ(vector<string>{key}, test_handles[0]->saw_keys);
       EXPECT_EQ(
-          vector<uint32_t>{static_cast<uint32_t>(lease_set.exptime())},
+          vector<uint32_t>{static_cast<uint32_t>(*lease_set.exptime_ref())},
           test_handles[0]->sawExptimes);
       EXPECT_EQ(vector<uint32_t>{}, test_handles[1]->sawExptimes);
       EXPECT_EQ(vector<string>{}, test_handles[1]->saw_keys);
       EXPECT_EQ(
-          vector<int64_t>{lease_set.leaseToken()},
+          vector<int64_t>{*lease_set.leaseToken_ref()},
           test_handles[0]->sawLeaseTokensSet);
       EXPECT_EQ(vector<int64_t>{}, test_handles[1]->sawLeaseTokensSet);
       test_handles[0]->saw_keys.clear();
@@ -278,20 +278,20 @@ TEST(migrateRouteTest, leases) {
     {
       now = start_time + 2 * interval - 1;
       McLeaseSetRequest lease_set(key);
-      lease_set.value() = *folly::IOBuf::copyBuffer("value");
-      lease_set.exptime() = start_time + 1000;
-      lease_set.leaseToken() = reply_get.leaseToken();
+      lease_set.value_ref() = *folly::IOBuf::copyBuffer("value");
+      lease_set.exptime_ref() = start_time + 1000;
+      lease_set.leaseToken_ref() = *reply_get.leaseToken_ref();
       auto reply_set = rh.route(lease_set);
-      EXPECT_TRUE(isErrorResult(reply_set.result()));
+      EXPECT_TRUE(isErrorResult(*reply_set.result_ref()));
       EXPECT_EQ(vector<string>{}, test_handles[0]->saw_keys);
       EXPECT_EQ(vector<string>{key}, test_handles[1]->saw_keys);
       EXPECT_EQ(vector<uint32_t>{}, test_handles[0]->sawExptimes);
       EXPECT_EQ(
-          vector<uint32_t>{static_cast<uint32_t>(lease_set.exptime())},
+          vector<uint32_t>{static_cast<uint32_t>(*lease_set.exptime_ref())},
           test_handles[1]->sawExptimes);
       EXPECT_EQ(vector<int64_t>{}, test_handles[0]->sawLeaseTokensSet);
       EXPECT_EQ(
-          vector<int64_t>{lease_set.leaseToken()},
+          vector<int64_t>{*lease_set.leaseToken_ref()},
           test_handles[1]->sawLeaseTokensSet);
       test_handles[1]->sawLeaseTokensSet.clear();
 
@@ -303,7 +303,7 @@ TEST(migrateRouteTest, leases) {
           vector<uint32_t>{static_cast<uint32_t>(-1)},
           test_handles[0]->sawExptimes);
       EXPECT_EQ(
-          vector<int64_t>{lease_set.leaseToken()},
+          vector<int64_t>{*lease_set.leaseToken_ref()},
           test_handles[0]->sawLeaseTokensSet);
       EXPECT_EQ(vector<int64_t>{}, test_handles[1]->sawLeaseTokensSet);
       test_handles[0]->sawExptimes.clear();

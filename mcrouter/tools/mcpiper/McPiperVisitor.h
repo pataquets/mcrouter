@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <cctype>
@@ -17,6 +15,9 @@
 #include <folly/Conv.h>
 #include <folly/Optional.h>
 #include <folly/Range.h>
+#include <thrift/lib/cpp2/FieldRef.h>
+#include <thrift/lib/cpp2/protocol/Serializer.h>
+#include <thrift/lib/cpp2/protocol/SimpleJSONProtocol.h>
 
 #include "mcrouter/lib/carbon/CommonSerializationTraits.h"
 #include "mcrouter/lib/carbon/Fields.h"
@@ -59,10 +60,11 @@ class McPiperVisitor {
   }
 
  private:
-  const std::unordered_set<std::string> kExcuseValues = {"value",
-                                                         "flags",
-                                                         "result",
-                                                         "key"};
+  const std::unordered_set<std::string> kExcuseValues = {
+      "value",
+      "flags",
+      "result",
+      "key"};
   facebook::memcache::StyledString out_;
   size_t indent_{0};
   const facebook::memcache::PrettyFormat format_{};
@@ -128,6 +130,16 @@ class McPiperVisitor {
   template <class T>
   facebook::memcache::StyledString serialize(const folly::Optional<T>& opt) {
     if (opt.hasValue()) {
+      return serialize(opt.value());
+    }
+    return facebook::memcache::StyledString{};
+  }
+
+  // optional_field_ref
+  template <class T>
+  facebook::memcache::StyledString serialize(
+      apache::thrift::optional_field_ref<T&> opt) {
+    if (opt.has_value()) {
       return serialize(opt.value());
     }
     return facebook::memcache::StyledString{};
@@ -228,9 +240,11 @@ class McPiperVisitor {
   std::enable_if_t<
       carbon::IsThriftWrapperStruct<T>::value,
       facebook::memcache::StyledString>
-  serialize(const T& /* value */) {
+  serialize(const T& t) {
     facebook::memcache::StyledString out;
-    out.append(serializeString("<Thrift structure>"));
+    out.append(serializeString(
+        apache::thrift::SimpleJSONSerializer::serialize<std::string>(
+            t.getThriftStruct())));
     return out;
   }
 
@@ -307,7 +321,7 @@ class McPiperVisitor {
   }
 };
 
-} // detail
+} // namespace detail
 
 template <class R>
 facebook::memcache::StyledString
@@ -317,4 +331,4 @@ print(const R& req, folly::StringPiece /* name */, bool script) {
   return std::move(printer).styled();
 }
 
-} // carbon
+} // namespace carbon

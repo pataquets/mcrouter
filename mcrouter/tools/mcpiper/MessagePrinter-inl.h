@@ -1,20 +1,19 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/Format.h>
 
 #include "mcrouter/lib/network/AsciiSerialized.h"
 #include "mcrouter/lib/network/McSerializedRequest.h"
+#include "mcrouter/lib/network/MessageHelpers.h"
 #include "mcrouter/lib/network/ServerLoad.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/tools/mcpiper/Color.h"
 #include "mcrouter/tools/mcpiper/Config.h"
 #include "mcrouter/tools/mcpiper/McPiperVisitor.h"
@@ -27,11 +26,12 @@ namespace detail {
 
 // Exptime
 template <class M>
-typename std::enable_if<M::hasExptime, int32_t>::type getExptime(const M& req) {
-  return req.exptime();
+typename std::enable_if<HasExptimeTrait<M>::value, int32_t>::type getExptime(
+    const M& req) {
+  return *req.exptime_ref();
 }
 template <class M>
-typename std::enable_if<!M::hasExptime, int32_t>::type getExptime(
+typename std::enable_if<!HasExptimeTrait<M>::value, int32_t>::type getExptime(
     const M& /* reply */) {
   return 0;
 }
@@ -42,10 +42,10 @@ int64_t getLeaseToken(const M& /* msg */) {
   return 0;
 }
 inline int64_t getLeaseToken(const McLeaseGetReply& msg) {
-  return msg.leaseToken();
+  return *msg.leaseToken_ref();
 }
 inline int64_t getLeaseToken(const McLeaseSetRequest& msg) {
-  return msg.leaseToken();
+  return *msg.leaseToken_ref();
 }
 
 // Message
@@ -60,7 +60,7 @@ template <class M>
 typename std::
     enable_if<carbon::detail::HasMessage<M>::value, folly::StringPiece>::type
     getMessage(const M& msg) {
-  return msg.message();
+  return *msg.message_ref();
 }
 
 template <class M>
@@ -77,34 +77,7 @@ constexpr typename std::
   return MatchingRequest<M>::name();
 }
 
-template <class Reply>
-typename std::enable_if<
-    !std::is_same<RequestFromReplyType<Reply, RequestReplyPairs>, void>::value,
-    void>::type
-prepareUmbrellaRawReply(
-    UmbrellaSerializedMessage& umbrellaSerializedMessage,
-    Reply&& reply,
-    uint64_t reqid,
-    const struct iovec*& iovOut,
-    size_t& niovOut) {
-  umbrellaSerializedMessage.prepare(std::move(reply), reqid, iovOut, niovOut);
-}
-
-template <class Reply>
-typename std::enable_if<
-    std::is_same<RequestFromReplyType<Reply, RequestReplyPairs>, void>::value,
-    void>::type
-prepareUmbrellaRawReply(
-    UmbrellaSerializedMessage&,
-    Reply&&,
-    uint64_t /* reqid */,
-    const struct iovec*& /* iovOut */,
-    size_t& /* niovOut */) {
-  LOG(ERROR) << "Umbrella Protocol does not support a reply type"
-             << " that is not Memcache compatible!";
-}
-
-} // detail
+} // namespace detail
 
 template <class Request>
 void MessagePrinter::requestReady(
@@ -116,8 +89,8 @@ void MessagePrinter::requestReady(
   if (auto out = filterAndBuildOutput(
           msgId,
           request,
-          request.key().fullKey().str(),
-          mc_res_unknown,
+          request.key_ref()->fullKey().str(),
+          carbon::Result::UNKNOWN,
           from,
           to,
           protocol)) {
@@ -138,21 +111,21 @@ void MessagePrinter::replyReady(
     const folly::SocketAddress& to,
     mc_protocol_t protocol,
     int64_t latencyUs,
-    ReplyStatsContext replyStatsContext) {
+    RpcStatsContext rpcStatsContext) {
   if (auto out = filterAndBuildOutput(
           msgId,
           reply,
           key,
-          reply.result(),
+          *reply.result_ref(),
           from,
           to,
           protocol,
           latencyUs,
-          replyStatsContext.serverLoad)) {
+          rpcStatsContext.serverLoad)) {
     stats_.numBytesBeforeCompression +=
-        replyStatsContext.replySizeBeforeCompression;
+        rpcStatsContext.replySizeBeforeCompression;
     stats_.numBytesAfterCompression +=
-        replyStatsContext.replySizeAfterCompression;
+        rpcStatsContext.replySizeAfterCompression;
     if (options_.raw) {
       printRawReply(msgId, std::forward<Reply>(reply), protocol);
     } else {
@@ -166,7 +139,7 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
     uint64_t msgId,
     const Message& message,
     const std::string& key,
-    mc_res_t result,
+    carbon::Result result,
     const folly::SocketAddress& from,
     const folly::SocketAddress& to,
     mc_protocol_t protocol,
@@ -260,14 +233,15 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
 
   if (options_.script) {
     out.append(",\n  \"flags\": ");
-    out.append(folly::to<std::string>(message.flags()));
+    out.append(folly::to<std::string>(getFlagsIfExist(message)));
   } else {
     out.append("\n  flags: ", format_.msgAttrColor);
     out.append(
-        folly::sformat("0x{:x}", message.flags()), format_.dataValueColor);
+        folly::sformat("0x{:x}", getFlagsIfExist(message)),
+        format_.dataValueColor);
   }
-  if (!options_.script && message.flags()) {
-    auto flagDesc = describeFlags(message.flags());
+  if (!options_.script && getFlagsIfExist(message)) {
+    auto flagDesc = describeFlags(getFlagsIfExist(message));
     if (!flagDesc.empty()) {
       out.pushAppendColor(format_.attrColor);
       out.append(" [");
@@ -283,17 +257,20 @@ folly::Optional<StyledString> MessagePrinter::filterAndBuildOutput(
       out.popAppendColor();
     }
   }
-  if (options_.script) {
+  auto typeSpecificAttr = getTypeSpecificAttributes(message);
+  if (options_.script && !typeSpecificAttr.empty()) {
     out.pushBack(',');
-    out.append(getTypeSpecificAttributes(message));
-  } else {
-    out.append(getTypeSpecificAttributes(message));
   }
+  out.append(typeSpecificAttr);
 
   if (!value.empty()) {
     size_t uncompressedSize;
     auto formattedValue = valueFormatter_->uncompressAndFormat(
-        value, message.flags(), format_, options_.script, uncompressedSize);
+        value,
+        getFlagsIfExist(message),
+        format_,
+        options_.script,
+        uncompressedSize);
 
     if (options_.script) {
       out.append(folly::sformat(",\n  \"value_wire_bytes\": {}", value.size()));
@@ -361,33 +338,26 @@ void MessagePrinter::printRawReply(
     mc_protocol_t protocol) {
   const struct iovec* iovsBegin = nullptr;
   size_t iovsCount = 0;
-  UmbrellaSerializedMessage umbrellaSerializedMessage;
   CaretSerializedMessage caretSerializedMessage;
   switch (protocol) {
     case mc_ascii_protocol:
       LOG_FIRST_N(INFO, 1) << "ASCII protocol is not supported for raw data";
-      break;
-    case mc_umbrella_protocol_DONOTUSE:
-      detail::prepareUmbrellaRawReply(
-          umbrellaSerializedMessage,
-          std::move(reply),
-          msgId,
-          iovsBegin,
-          iovsCount);
-      break;
+      return;
     case mc_caret_protocol:
-      caretSerializedMessage.prepare(
-          std::move(reply),
-          msgId,
-          CodecIdRange::Empty,
-          nullptr, /* codec map */
-          0.0, /* drop probability */
-          ServerLoad::zero(),
-          iovsBegin,
-          iovsCount);
+      if (!caretSerializedMessage.prepare(
+              std::move(reply),
+              msgId,
+              CodecIdRange::Empty,
+              nullptr, /* codec map */
+              ServerLoad::zero(),
+              iovsBegin,
+              iovsCount)) {
+        LOG(ERROR) << "Serialization failed for caret reply " << msgId;
+        return;
+      }
       break;
     default:
-      CHECK(false);
+      CHECK(false) << "Invalid protocol!";
   }
 
   printRawMessage(iovsBegin, iovsCount);
@@ -402,9 +372,13 @@ void MessagePrinter::printRawRequest(
     LOG_FIRST_N(INFO, 1) << "ASCII protocol is not supported for raw data";
     return;
   }
-  McSerializedRequest req(request, msgId, protocol, CodecIdRange::Empty);
 
-  printRawMessage(req.getIovs(), req.getIovsCount());
+  McSerializedRequest req(request, msgId, protocol, CodecIdRange::Empty);
+  if (req.serializationResult() == McSerializedRequest::Result::OK) {
+    printRawMessage(req.getIovs(), req.getIovsCount());
+  } else {
+    LOG(ERROR) << "Serialization failed for request " << msgId << ".";
+  }
 }
 
 template <class Message>
@@ -412,5 +386,5 @@ StyledString MessagePrinter::getTypeSpecificAttributes(const Message& msg) {
   return carbon::print(msg, detail::getName<Message>(), options_.script);
 }
 
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

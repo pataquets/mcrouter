@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <folly/dynamic.h>
 
 #include "mcrouter/lib/config/RouteHandleProviderIf.h"
@@ -93,6 +91,7 @@ RouteHandleFactory<RouteHandleIf>::createList(const folly::dynamic& json) {
         ret.push_back(std::move(listIt));
       }
     }
+    ret.shrink_to_fit();
     return ret;
   } else if (json.isObject()) {
     auto jName = json.get_ptr("name");
@@ -109,6 +108,16 @@ RouteHandleFactory<RouteHandleIf>::createList(const folly::dynamic& json) {
     if (json.empty()) {
       // useful for routes with optional children
       return {};
+    }
+
+    // check if we need to use a pre-built list of children.
+    constexpr folly::StringPiece kChildrenListStr = "$children_list$";
+    if (json.stringPiece() == kChildrenListStr) {
+      checkLogic(
+          !childrenLists_.empty(),
+          "$children_list$ was found, but there were no pre-constructed "
+          "children available. Did you forget to call pushChildrenList()?");
+      return childrenLists_.top();
     }
 
     // check if we already parsed the same string. It can be named handle or
@@ -144,5 +153,24 @@ RouteHandleFactory<RouteHandleIf>::createList(const folly::dynamic& json) {
   throwLogic(
       "RouteHandle is {}, expected object/array/string", json.typeName());
 }
+
+template <class RouteHandleIf>
+const folly::dynamic& RouteHandleFactory<RouteHandleIf>::parsePool(
+    const folly::dynamic& json) {
+  return provider_.parsePool(json);
 }
-} // facebook::memcache
+
+template <class RouteHandleIf>
+void RouteHandleFactory<RouteHandleIf>::pushChildrenList(
+    std::vector<RouteHandlePtr> children) {
+  childrenLists_.push(std::move(children));
+}
+
+template <class RouteHandleIf>
+void RouteHandleFactory<RouteHandleIf>::popChildrenList() {
+  assert(!childrenLists_.empty());
+  childrenLists_.pop();
+}
+
+} // namespace memcache
+} // namespace facebook

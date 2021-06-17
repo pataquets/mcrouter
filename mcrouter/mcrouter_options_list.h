@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2015, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 // @nolint
 #ifndef MCROUTER_OPTION_GROUP
 #define MCROUTER_OPTION_GROUP(_sep)
@@ -293,6 +291,16 @@ MCROUTER_OPTION_INTEGER(
 
 MCROUTER_OPTION_INTEGER(
     size_t,
+    proxy_max_inflight_shadow_requests,
+    0,
+    "proxy-max-inflight-shadow-requests",
+    no_short,
+    "If non-zero, sets the limit on maximum shadow requests that can be inflight"
+    " on each proxy thread.  Shadow requests over the limit will be dropped and"
+    " an error reply sent.")
+
+MCROUTER_OPTION_INTEGER(
+    size_t,
     proxy_max_throttled_requests,
     0,
     "proxy-max-throttled-requests",
@@ -305,21 +313,21 @@ MCROUTER_OPTION_INTEGER(
 
 MCROUTER_OPTION_STRING(
     pem_cert_path,
-    "",
+    "", // this may get overwritten by finalizeOptions
     "pem-cert-path",
     no_short,
-    "Path of pem-style certificate for ssl")
+    "Path of pem-style client certificate for ssl.")
 
 MCROUTER_OPTION_STRING(
     pem_key_path,
-    "",
+    "", // this may get overwritten by finalizeOptions
     "pem-key-path",
     no_short,
-    "Path of pem-style key for ssl")
+    "Path of pem-style client key for ssl.")
 
 MCROUTER_OPTION_STRING(
     pem_ca_path,
-    "",
+    MCROUTER_DEFAULT_CA_PATH,
     "pem-ca-path",
     no_short,
     "Path of pem-style CA cert for ssl")
@@ -330,6 +338,24 @@ MCROUTER_OPTION_STRING(
     "ssl-service-identity",
     no_short,
     "The service identity of the destination service when SSL is used")
+
+MCROUTER_OPTION_TOGGLE(
+    ssl_service_identity_authorization_log,
+    false,
+    "ssl-service-identity-authorization-log",
+    no_short,
+    "The configured service identity of the client is compared against the "
+    "service identity of the server in the peer certificate. Log if they "
+    "do not match.")
+
+MCROUTER_OPTION_TOGGLE(
+    ssl_service_identity_authorization_enforce,
+    false,
+    "ssl-service-identity-authorization-enforce",
+    no_short,
+    "The configured service identity of the client is compared against the "
+    "service identity of the server in the peer certificate. Fail to "
+    "connect if they do not match.")
 
 MCROUTER_OPTION_TOGGLE(
     enable_qos,
@@ -366,6 +392,20 @@ MCROUTER_OPTION_TOGGLE(
     "ssl-connection-cache",
     no_short,
     "If enabled, limited number of SSL sessions will be cached")
+
+MCROUTER_OPTION_TOGGLE(
+    ssl_handshake_offload,
+    false,
+    "ssl-handshake-offload",
+    no_short,
+    "If enabled, SSL handshakes are offloaded to a separate threadpool")
+
+MCROUTER_OPTION_TOGGLE(
+    ssl_verify_peers,
+    false,
+    "ssl-verify-peers",
+    no_short,
+    "If enabled, clients will verify server certificates.")
 
 MCROUTER_OPTION_TOGGLE(
     enable_compression,
@@ -427,6 +467,13 @@ MCROUTER_OPTION_STRING(
     " --config option is used.")
 
 MCROUTER_OPTION_STRING(
+    pool_stats_config_file,
+    "",
+    "pool-stats-config-file",
+    no_short,
+    "File containing stats enabled pool names.")
+
+MCROUTER_OPTION_STRING(
     config_str,
     "",
     "config-str",
@@ -451,12 +498,19 @@ MCROUTER_OPTION_TOGGLE(
     "Disable reporting get errors as misses")
 
 MCROUTER_OPTION_TOGGLE(
+    disable_miss_on_arith_errors,
+    false,
+    "disable-miss-on-arith-errors",
+    no_short,
+    "Disable reporting arithmetic operation errors as misses")
+
+MCROUTER_OPTION_TOGGLE(
     group_remote_errors,
     false,
     "group-remote-errors",
     no_short,
     "Groups all remote (i.e. non-local) errors together, returning a single "
-    "result for all of them: mc_res_remote_error")
+    "result for all of them: REMOTE_ERROR")
 
 MCROUTER_OPTION_TOGGLE(
     send_invalid_route_to_default,
@@ -472,6 +526,13 @@ MCROUTER_OPTION_TOGGLE(
     no_short,
     "Enable flush_all command")
 
+MCROUTER_OPTION_TOGGLE(
+    disable_request_deadline_check,
+    false,
+    "disable-request-deadline-check",
+    no_short,
+    "Disable request deadline functionality")
+
 MCROUTER_OPTION_INTEGER(
     int,
     reconfiguration_delay_ms,
@@ -479,6 +540,23 @@ MCROUTER_OPTION_INTEGER(
     "reconfiguration-delay-ms",
     no_short,
     "Delay between config files change and mcrouter reconfiguration.")
+
+MCROUTER_OPTION_INTEGER(
+    int,
+    reconfiguration_jitter_ms,
+    0,
+    "reconfiguration-jitter-ms",
+    no_short,
+    "Random jitter from [0,reconfiguration_jitter_ms) applied after "
+    "config files change and before mcrouter reconfiguration.")
+
+MCROUTER_OPTION_INTEGER(
+    int,
+    post_reconfiguration_delay_ms,
+    0,
+    "post-reconfiguration-delay-ms",
+    no_short,
+    "Delay after a reconfiguration is complete.")
 
 MCROUTER_OPTION_STRING_MAP(
     config_params,
@@ -521,15 +599,6 @@ MCROUTER_OPTION_INTEGER(
     "timeouts-until-tko",
     no_short,
     "Mark as TKO after this many failures")
-
-MCROUTER_OPTION_INTEGER(
-    size_t,
-    maximum_soft_tkos,
-    40,
-    "maximum-soft-tkos",
-    no_short,
-    "The maximum number of machines we can mark TKO if they don't have a hard"
-    " failure.")
 
 MCROUTER_OPTION_TOGGLE(
     allow_only_gets,
@@ -586,6 +655,16 @@ MCROUTER_OPTION_INTEGER(
     "Maximum time in ms that a new request can wait in the queue before being"
     " discarded. Enabled only if value is non-zero and"
     " if proxy-max-throttled-requests is enabled.")
+
+MCROUTER_OPTION_INTEGER(
+    unsigned int,
+    connect_timeout_retries,
+    0,
+    "connect-timeout-retries",
+    no_short,
+    "The number of times to retry establishing a connection in case of a"
+    " connect timeout. We will just return the result back to the client after"
+    " either the connection is esblished, or we exhausted all retries.")
 
 MCROUTER_OPTION_GROUP("Custom Memory Allocation")
 
@@ -667,8 +746,19 @@ MCROUTER_OPTION_INTEGER(
     0,
     "collect-rxmit-stats-every-hz",
     no_short,
-    "Will calculate retransmits per kB after every set cycles."
+    "Will calculate retransmits per kB after every set cycles whenever a "
+    "timeout or deviation from average latency occurs."
     " If value is 0, calculation won't be done.")
+
+MCROUTER_OPTION_INTEGER(
+    uint64_t,
+    rxmit_latency_deviation_us,
+    0,
+    "rxmit-latency-deviation-us",
+    no_short,
+    "Latency deviation of request in microseconds from the average latency on "
+    "the connection will trigger recalculation of retransmits per kB. "
+    "If value is 0, calculation won't be done.")
 
 MCROUTER_OPTION_INTEGER(
     uint64_t,
@@ -718,6 +808,60 @@ MCROUTER_OPTION_INTEGER(
     "Maximum size of LRU cache mapping normal lease tokens to shadow lease"
     " tokens. High rates of shadowing of lease operations may require a limit"
     " higher than the default. 0 disables limiting of map size.")
+
+MCROUTER_OPTION_TOGGLE(
+    enable_ssl_tfo,
+    false,
+    "enable-ssl-tfo",
+    no_short,
+    "enable TFO when connecting/accepting via SSL")
+
+MCROUTER_OPTION_TOGGLE(
+    tls_prefer_ocb_cipher,
+    false,
+    "tls-prefer-ocb-cipher",
+    no_short,
+    "Prefer AES-OCB cipher for TLSv1.3 connections if available")
+
+MCROUTER_OPTION_TOGGLE(
+    thread_affinity,
+    false,
+    "thread-affinity",
+    no_short,
+    "Enable deterministic selection of the proxy thread to lower the number of"
+    "connections between client and server.")
+
+MCROUTER_OPTION_TOGGLE(
+    disable_shard_split_route,
+    false,
+    "disable-shard-split-route",
+    no_short,
+    "Disable shard split route. Ignore shard_splits field in routing config.")
+
+MCROUTER_OPTION_TOGGLE(
+    enable_service_router,
+    false,
+    "enable-service-router",
+    no_short,
+    "Enable service router for pool level routing.")
+
+MCROUTER_OPTION_TOGGLE(
+    enable_partial_reconfigure,
+    false,
+    "enable-partial-reconfigure",
+    no_short,
+    "Incrementally update routing tree with simple config source changes. For "
+    " complicated config source change, Mcrouter will resort to build a new "
+    "routing tree as if this flag is disabled.")
+
+MCROUTER_OPTION_INTEGER(
+    size_t,
+    thrift_compression_threshold,
+    0,
+    "thrift-compression-threshold",
+    no_short,
+    "Payloads >= thriftCompressionTreshold will be compressed "
+    "iff thriftCompression is enabled.")
 
 #ifdef ADDITIONAL_OPTIONS_FILE
 #include ADDITIONAL_OPTIONS_FILE

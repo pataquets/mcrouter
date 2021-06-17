@@ -1,3 +1,8 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.69)
@@ -9,6 +14,16 @@ m4_append([mcrouter_version], [.0])
 m4_append([mcrouter_version], [mcrouter_version_suffix])
 AC_INIT([mcrouter], [mcrouter_version], mcrouter@fb.com)
 
+AC_ARG_VAR([FBTHRIFT_BIN], [Path to FBThrift compiler])
+AC_CHECK_PROG(have_fbthrift, thrift1, yes, no, path = $FBTHRIFT_BIN)
+AS_IF(
+  [test "x$have_fbthrift" = "xyes"],
+  [FBTHRIFT="$FBTHRIFT_BIN/thrift1 "],
+  [AC_MSG_ERROR([Unable to find FBThrift Compiler])]
+)
+AC_SUBST([FBTHRIFT])
+
+
 AC_DEFINE_UNQUOTED([MCROUTER_PACKAGE_STRING], ["AC_PACKAGE_VERSION AC_PACKAGE_NAME"], [Full name and version of this package, with version coming first for libmemcached compatibility])
 
 AC_CONFIG_SRCDIR([CarbonRouterInstance.h])
@@ -16,6 +31,8 @@ AC_CONFIG_HEADERS([config.h:config.hin])
 AC_CONFIG_LINKS([config-impl.h:mcrouter_config-impl.h])
 AC_CONFIG_LINKS([test/config.py:test/mcrouter_config.py])
 AC_CONFIG_LINKS([RouterRegistry.h:RouterRegistry-impl.h])
+AC_CONFIG_LINKS([ThriftAcceptor.h:ThriftAcceptor-impl.h])
+AC_CONFIG_LINKS([mcrouter_sr_deps.h:mcrouter_sr_deps-impl.h])
 AC_CONFIG_AUX_DIR([build-aux])
 
 AM_INIT_AUTOMAKE([1.14 foreign dist-bzip2 nostdinc subdir-objects parallel-tests])
@@ -23,7 +40,7 @@ AM_INIT_AUTOMAKE([1.14 foreign dist-bzip2 nostdinc subdir-objects parallel-tests
 AC_CONFIG_MACRO_DIR([m4])
 
 AC_PROG_INSTALL
-AC_PROG_LIBTOOL
+LT_INIT
 
 AC_LANG([C++])
 
@@ -35,7 +52,7 @@ AX_PYTHON_DEVEL()
 AX_CXX_COMPILE_STDCXX_14([],[mandatory])
 LT_INIT
 
-CXXFLAGS="-fno-strict-aliasing $CXXFLAGS"
+CXXFLAGS="-fno-strict-aliasing -std=c++17 $CXXFLAGS"
 CXXFLAGS="-W -Wall -Wextra -Wno-unused-parameter $CXXFLAGS"
 CXXFLAGS=" -Wno-missing-field-initializers -Wno-deprecated $CXXFLAGS"
 CXXFLAGS="-DLIBMC_FBTRACE_DISABLE -DDISABLE_COMPRESSION $CXXFLAGS"
@@ -91,8 +108,8 @@ if test "$mcrouter_cv_prog_cc_gflags" != "yes"; then
 fi
 
 # check for boost libs
-AX_BOOST_BASE([1.51.0], [], [AC_MSG_ERROR(
-              [Please install boost >= 1.51.0 (context, filesystem, program_options, regex and system)])])
+AX_BOOST_BASE([1.65.1], [], [AC_MSG_ERROR(
+              [Please install boost >= 1.65.1 (context, filesystem, program_options, regex and system)])])
 # TODO: also check boost::ctx, not only boost::context
 AX_BOOST_CONTEXT
 AX_BOOST_FILESYSTEM
@@ -107,17 +124,42 @@ AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netdb.h stdint.h string.h sys/fil
 
 AC_CHECK_LIB([event], [event_set], [], [AC_MSG_ERROR([Unable to find libevent])])
 AC_CHECK_LIB([crypto], [MD5_Init], [], [AC_MSG_ERROR([Unable to find libcrypto])])
-AC_CHECK_LIB([ssl], [SSL_library_init], [], [AC_MSG_ERROR([Unable to find ssl])])
+AC_CHECK_LIB([ssl], [SSL_CTX_new], [], [AC_MSG_ERROR([Unable to find ssl])])
 AC_CHECK_LIB([z], [gzread], [], [AC_MSG_ERROR([Unable to find zlib])])
 AC_CHECK_LIB([double-conversion],[ceil],[],[AC_MSG_ERROR(
              [Please install double-conversion library])])
+AC_CHECK_LIB([dl], [dlopen], [])
+AC_CHECK_LIB([iberty], [cplus_demangle_v3_callback], [])
 AC_CHECK_LIB([folly],[getenv],[],[AC_MSG_ERROR(
              [Please install the folly library])])
+AC_CHECK_LIB([sodium],[sodium_init],[],[AC_MSG_ERROR(
+             [Please install the libsodium library])])
+AC_CHECK_LIB([fizz],[getenv],[],[AC_MSG_ERROR(
+             [Please install the fizz library])])
 AC_CHECK_HEADER([folly/Likely.h], [], [AC_MSG_ERROR(
-[Couldn't find folly, please download from https://github.com/facebook/folly]
-)], [])
-AC_CHECK_LIB([wangle], [getenv], [], [AC_MSG_ERROR(
-             [Please install the wangle library])])
+                [Could not find folly, please download from https://github.com/facebook/folly])], [])
+
+# Commenting out the wangle dependency from here, because there is a tricky
+# inter-library dependency that resolves with the right order of LDFLAGS, and
+# this dependency here messes the order.
+#AC_CHECK_LIB([wangle], [getenv], [], [AC_MSG_ERROR(
+#             [Please install the wangle library])])
+
+PKG_CHECK_MODULES([GTEST], [gtest], [], [
+  # gtest-devel shipped by CentOS doesn't include a .pc file, so let's fallback
+  # to using normal library and header checks and just set defaults for the
+  # GTEST_* variables.
+  #
+  # The libgtest-dev package in Ubuntu 18.04 is worse, it doesn't even ship
+  # a built library, and only sources... Update the Ubuntu scripts to build
+  # it from source on that platform.
+  AC_CHECK_LIB([gtest], [main], [GTEST_LIBS="-lgtest"], [
+    AC_MSG_ERROR([Please install the gtest library])
+  ])
+  AC_CHECK_HEADER([gtest/gtest.h], [], [
+    AC_MSG_ERROR([Please install the gtest library])
+  ])
+])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
@@ -154,7 +196,8 @@ AC_CHECK_FUNCS([gettimeofday \
 
 LIBS="$LIBS $BOOST_LDFLAGS $BOOST_CONTEXT_LIB $BOOST_FILESYSTEM_LIB \
       $BOOST_PROGRAM_OPTIONS_LIB $BOOST_SYSTEM_LIB $BOOST_REGEX_LIB \
-      $BOOST_THREAD_LIB -lpthread -pthread"
+      $BOOST_THREAD_LIB -lpthread -pthread -ldl -lunwind \
+      -lbz2 -llz4 -llzma -lsnappy -lzstd"
 
 AM_PATH_PYTHON([2.6],, [:])
 AM_CONDITIONAL([HAVE_PYTHON], [test "$PYTHON" != :])
@@ -166,13 +209,14 @@ AH_BOTTOM([#include "RouterRegistry.h"])
 AC_CONFIG_FILES([Makefile
                  lib/Makefile
                  lib/test/Makefile
+                 lib/carbon/Makefile
                  lib/config/Makefile
                  lib/config/test/Makefile
                  lib/fbi/Makefile
                  lib/fbi/test/Makefile
                  lib/fbi/cpp/Makefile
                  lib/fbi/cpp/test/Makefile
-                 lib/network/Makefile
+                 lib/network/gen/Makefile
                  lib/network/test/Makefile
                  routes/Makefile
                  routes/test/Makefile

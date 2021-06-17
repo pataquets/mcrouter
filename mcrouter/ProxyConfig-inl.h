@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/Conv.h>
@@ -31,7 +29,8 @@ ProxyConfig<RouterInfo>::ProxyConfig(
     Proxy<RouterInfo>& proxy,
     const folly::dynamic& json,
     std::string configMd5Digest,
-    PoolFactory& poolFactory)
+    PoolFactory& poolFactory,
+    size_t index)
     : configMd5Digest_(std::move(configMd5Digest)) {
   McRouteHandleProvider<RouterInfo> provider(proxy, poolFactory);
   RouteHandleFactory<typename RouterInfo::RouteHandleIf> factory(
@@ -100,17 +99,21 @@ ProxyConfig<RouterInfo>::ProxyConfig(
 
   asyncLogRoutes_ = provider.releaseAsyncLogRoutes();
   pools_ = provider.releasePools();
+  if (index == 0) {
+    // only need to keep partial config info in one proxy
+    partialConfigs_ = provider.releasePartialConfigs();
+  }
   accessPoints_ = provider.releaseAccessPoints();
-  proxyRoute_ =
-      std::make_shared<ProxyRoute<RouterInfo>>(&proxy, routeSelectors);
-  serviceInfo_ = std::make_shared<ServiceInfo<RouterInfo>>(&proxy, *this);
+  proxyRoute_ = std::make_shared<ProxyRoute<RouterInfo>>(proxy, routeSelectors);
+  serviceInfo_ = std::make_shared<ServiceInfo<RouterInfo>>(proxy, *this);
 }
 
 template <class RouterInfo>
 std::shared_ptr<typename RouterInfo::RouteHandleIf>
 ProxyConfig<RouterInfo>::getRouteHandleForAsyncLog(
     folly::StringPiece asyncLogName) const {
-  return tryGet(asyncLogRoutes_, asyncLogName);
+  auto it = asyncLogRoutes_.find(asyncLogName);
+  return it != asyncLogRoutes_.end() ? it->second : nullptr;
 }
 
 template <class RouterInfo>

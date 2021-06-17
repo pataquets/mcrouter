@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <atomic>
 #include <memory>
 #include <thread>
@@ -21,7 +19,7 @@ using facebook::memcache::mcrouter::Observable;
 struct NoCopy {
   int x;
 
-  explicit NoCopy(int x_ = 0) : x(x_){}
+  explicit NoCopy(int x_ = 0) : x(x_) {}
   NoCopy(const NoCopy&) = delete;
   NoCopy(NoCopy&&) = default;
 
@@ -65,7 +63,7 @@ TEST(Observable, sanity) {
   int cur = -1;
 
   auto onUpdate = [&step, &prev, &cur](
-      const NoCopy& oldData, const NoCopy& newData) {
+                      const NoCopy& oldData, const NoCopy& newData) {
     EXPECT_EQ(oldData.x, prev);
     EXPECT_EQ(newData.x, cur);
 

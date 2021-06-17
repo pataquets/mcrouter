@@ -1,15 +1,13 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "MessagePrinter.h"
 
-#include <folly/Bits.h>
+#include <folly/lang/Bits.h>
 
 namespace facebook {
 namespace memcache {
@@ -149,15 +147,15 @@ std::string MessagePrinter::serializeConnectionDetails(
 
 std::string MessagePrinter::serializeMessageHeader(
     folly::StringPiece messageName,
-    mc_res_t result,
+    carbon::Result result,
     const std::string& key) {
   std::string out;
 
   if (options_.script) {
     out.append(folly::sformat("\"type\": \"{}\"", messageName.data()));
-    if (result != mc_res_unknown) {
-      out.append(
-          folly::sformat(",\n  \"result\": \"{}\"", mc_res_to_string(result)));
+    if (result != carbon::Result::UNKNOWN) {
+      out.append(folly::sformat(
+          ",\n  \"result\": \"{}\"", carbon::resultToString(result)));
     }
     if (!key.empty()) {
       out.append(
@@ -165,9 +163,9 @@ std::string MessagePrinter::serializeMessageHeader(
     }
   } else {
     out.append(messageName.data());
-    if (result != mc_res_unknown) {
+    if (result != carbon::Result::UNKNOWN) {
       out.push_back(' ');
-      out.append(mc_res_to_string(result));
+      out.append(carbon::resultToString(result));
     }
     if (!key.empty()) {
       out.push_back(' ');
@@ -197,5 +195,5 @@ std::vector<std::pair<size_t, size_t>> MessagePrinter::matchAll(
   }
   return result;
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

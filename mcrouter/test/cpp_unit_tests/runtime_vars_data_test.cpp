@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <string>
 
 #include <gtest/gtest.h>
@@ -47,9 +45,10 @@ TEST(runtime_vars_data, register_callback) {
   obj.set(std::make_shared<const RuntimeVarsData>(json));
   int counter = 0;
   {
-    auto handle = obj.subscribeAndCall([&counter](
-        std::shared_ptr<const RuntimeVarsData>,
-        std::shared_ptr<const RuntimeVarsData>) { counter++; });
+    auto handle = obj.subscribeAndCall(
+        [&counter](
+            std::shared_ptr<const RuntimeVarsData>,
+            std::shared_ptr<const RuntimeVarsData>) { counter++; });
     EXPECT_EQ(counter, 1);
     jsonObj["key2"] = "value3";
     json = folly::to<string>(folly::toJson(jsonObj));

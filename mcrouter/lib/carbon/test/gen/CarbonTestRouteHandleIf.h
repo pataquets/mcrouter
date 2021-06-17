@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -44,25 +42,20 @@ class CarbonTestRouteHandleIf {
   virtual AnotherReply route(const AnotherRequest&) = 0;
   virtual TestReply route(const TestRequest&) = 0;
   virtual TestReplyStringKey route(const TestRequestStringKey&) = 0;
-  virtual test2::util::YetAnotherReply route(
-      const test2::util::YetAnotherRequest&) = 0;
+  virtual test2::util::YetAnotherReply route(const test2::util::YetAnotherRequest&) = 0;
 
-  virtual void traverse(
-      const AnotherRequest&,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&)
-      const = 0;
-  virtual void traverse(
-      const TestRequest&,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&)
-      const = 0;
-  virtual void traverse(
-      const TestRequestStringKey&,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&)
-      const = 0;
-  virtual void traverse(
-      const test2::util::YetAnotherRequest&,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&)
-      const = 0;
+virtual bool traverse(
+    const AnotherRequest&,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&) const = 0;
+virtual bool traverse(
+    const TestRequest&,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&) const = 0;
+virtual bool traverse(
+    const TestRequestStringKey&,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&) const = 0;
+virtual bool traverse(
+    const test2::util::YetAnotherRequest&,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&) const = 0;
 };
 
 template <class Route>
@@ -84,39 +77,37 @@ class CarbonTestRouteHandle : public CarbonTestRouteHandleIf {
   TestReplyStringKey route(const TestRequestStringKey& request) override final {
     return route_.route(request);
   }
-  test2::util::YetAnotherReply route(
-      const test2::util::YetAnotherRequest& request) override final {
+  test2::util::YetAnotherReply route(const test2::util::YetAnotherRequest& request) override final {
     return route_.route(request);
   }
 
-  void traverse(
-      const AnotherRequest& request,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
-  void traverse(
-      const TestRequest& request,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
-  void traverse(
-      const TestRequestStringKey& request,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
-  void traverse(
-      const test2::util::YetAnotherRequest& request,
-      const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
+bool traverse(
+    const AnotherRequest& request,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
+bool traverse(
+    const TestRequest& request,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
+bool traverse(
+    const TestRequestStringKey& request,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
+bool traverse(
+    const test2::util::YetAnotherRequest& request,
+    const facebook::memcache::RouteHandleTraverser<CarbonTestRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
 
  private:
   Route route_;
 };
-
 } // namespace test
 } // namespace carbon

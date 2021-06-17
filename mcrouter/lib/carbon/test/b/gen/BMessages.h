@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -23,7 +21,6 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <mcrouter/lib/carbon/CarbonProtocolReader.h>
-#include <mcrouter/lib/carbon/CarbonProtocolWriter.h>
 #include <mcrouter/lib/carbon/CommonSerializationTraits.h>
 #include <mcrouter/lib/carbon/Keys.h>
 #include <mcrouter/lib/carbon/ReplyCommon.h>
@@ -40,10 +37,6 @@ namespace test {
 
 class BaseStruct {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
 
   BaseStruct() = default;
   BaseStruct(const BaseStruct&) = default;
@@ -57,14 +50,22 @@ class BaseStruct {
   int64_t& baseInt64Member() {
     return baseInt64Member_;
   }
-  uint64_t flags() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<const int64_t&>
+   baseInt64Member_ref() const& {
+    return {this->baseInt64Member_, __isset.baseInt64Member};
   }
-  int32_t exptime() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<int64_t&>
+   baseInt64Member_ref() & {
+    return {this->baseInt64Member_, __isset.baseInt64Member};
   }
+  FOLLY_ERASE ::apache::thrift::field_ref<int64_t&&>
+   baseInt64Member_ref() && {
+      return {std::move(this->baseInt64Member_), __isset.baseInt64Member};
+  }
+  
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -74,15 +75,15 @@ class BaseStruct {
   void visitFields(V&& v) const;
 
  private:
+  struct __isset {
+    bool baseInt64Member;
+  } __isset = {};
+
   int64_t baseInt64Member_{0};
 };
 
 class SimpleStruct {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
 
   SimpleStruct() = default;
   SimpleStruct(const SimpleStruct&) = default;
@@ -96,11 +97,27 @@ class SimpleStruct {
   const BaseStruct& asBaseStruct() const {
     return _carbon_basestruct_;
   }
+  FOLLY_ERASE ::apache::thrift::field_ref<const BaseStruct&>
+   baseStruct_ref() const& {
+    return {this->_carbon_basestruct_, __isset._carbon_basestruct_};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<BaseStruct&>
+   baseStruct_ref() & {
+    return {this->_carbon_basestruct_, __isset._carbon_basestruct_};
+  }
   int64_t baseInt64Member() const {
     return _carbon_basestruct_.baseInt64Member();
   }
   int64_t& baseInt64Member() {
     return _carbon_basestruct_.baseInt64Member();
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<const int64_t&>
+   baseInt64Member_ref() const& {
+    return _carbon_basestruct_.baseInt64Member_ref();
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<int64_t&>
+   baseInt64Member_ref() & {
+    return _carbon_basestruct_.baseInt64Member_ref();
   }
   int32_t int32Member() const {
     return int32Member_;
@@ -126,14 +143,61 @@ class SimpleStruct {
   std::vector<test2::util::SimpleStruct>& vectorMember() {
     return vectorMember_;
   }
-  uint64_t flags() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<const int32_t&>
+   int32Member_ref() const& {
+    return {this->int32Member_, __isset.int32Member};
   }
-  int32_t exptime() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<int32_t&>
+   int32Member_ref() & {
+    return {this->int32Member_, __isset.int32Member};
   }
+  FOLLY_ERASE ::apache::thrift::field_ref<int32_t&&>
+   int32Member_ref() && {
+      return {std::move(this->int32Member_), __isset.int32Member};
+  }
+  
+  FOLLY_ERASE ::apache::thrift::field_ref<const std::string&>
+   stringMember_ref() const& {
+    return {this->stringMember_, __isset.stringMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<std::string&>
+   stringMember_ref() & {
+    return {this->stringMember_, __isset.stringMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<std::string&&>
+   stringMember_ref() && {
+      return {std::move(this->stringMember_), __isset.stringMember};
+  }
+  
+  FOLLY_ERASE ::apache::thrift::field_ref<const test2::util::SimpleEnum&>
+   enumMember_ref() const& {
+    return {this->enumMember_, __isset.enumMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<test2::util::SimpleEnum&>
+   enumMember_ref() & {
+    return {this->enumMember_, __isset.enumMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<test2::util::SimpleEnum&&>
+   enumMember_ref() && {
+      return {std::move(this->enumMember_), __isset.enumMember};
+  }
+  
+  FOLLY_ERASE ::apache::thrift::field_ref<const std::vector<test2::util::SimpleStruct>&>
+   vectorMember_ref() const& {
+    return {this->vectorMember_, __isset.vectorMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<std::vector<test2::util::SimpleStruct>&>
+   vectorMember_ref() & {
+    return {this->vectorMember_, __isset.vectorMember};
+  }
+  FOLLY_ERASE ::apache::thrift::field_ref<std::vector<test2::util::SimpleStruct>&&>
+   vectorMember_ref() && {
+      return {std::move(this->vectorMember_), __isset.vectorMember};
+  }
+  
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -143,13 +207,20 @@ class SimpleStruct {
   void visitFields(V&& v) const;
 
  private:
+  struct __isset {
+    bool _carbon_basestruct_;
+    bool int32Member;
+    bool stringMember;
+    bool enumMember;
+    bool vectorMember;
+  } __isset = {};
+
   BaseStruct _carbon_basestruct_;
   std::string stringMember_;
   test2::util::SimpleEnum enumMember_{test2::util::SimpleEnum::Twenty};
   std::vector<test2::util::SimpleStruct> vectorMember_;
   int32_t int32Member_{0};
 };
-
 } // namespace test
 } // namespace carbon
 

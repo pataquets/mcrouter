@@ -1,18 +1,17 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <cassert>
 #include <cstddef>
 #include <random>
 
+#include <folly/Portability.h>
 #include <folly/dynamic.h>
 #include <folly/fibers/FiberManager.h>
 #include <folly/io/async/VirtualEventBase.h>
@@ -20,6 +19,7 @@
 #include "mcrouter/AsyncLog.h"
 #include "mcrouter/ProxyStats.h"
 #include "mcrouter/config.h"
+#include "mcrouter/lib/network/Transport.h"
 
 namespace facebook {
 namespace memcache {
@@ -33,9 +33,7 @@ class ProxyDestinationMap;
 
 class ProxyBase {
  public:
-  using FlushList = boost::intrusive::list<
-      folly::EventBase::LoopCallback,
-      boost::intrusive::constant_time_size<false>>;
+  using FlushList = Transport::FlushList;
 
   template <class RouterInfo>
   ProxyBase(
@@ -112,6 +110,18 @@ class ProxyBase {
     return flushList_;
   }
 
+  /**
+   * This lets code check whether it is or is not running in a thread that is
+   * also used by mcrouter. This can be important for thread safety /
+   * re-entrancy, particularly if that code is synchronous and calls into cache
+   * client.
+   */
+  static inline bool isInProxyThread() {
+    return isProxyThread_;
+  }
+
+  virtual bool messageQueueFull() const noexcept = 0;
+
  private:
   CarbonRouterInstanceBase& router_;
   const size_t id_{0};
@@ -128,6 +138,8 @@ class ProxyBase {
 
   static folly::fibers::FiberManager::Options getFiberManagerOptions(
       const McrouterOptions& opts);
+
+  static thread_local bool isProxyThread_;
 
  protected:
   // A queue of callbacks for flushing requests in AsyncMcClients.
@@ -166,8 +178,8 @@ class ProxyBase {
 
   friend class ProxyRequestContext;
 };
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ProxyBase-inl.h"

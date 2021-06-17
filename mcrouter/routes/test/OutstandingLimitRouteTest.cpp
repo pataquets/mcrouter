@@ -1,19 +1,17 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <memory>
 #include <random>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/routes/OutstandingLimitRoute.h"
 #include "mcrouter/routes/test/RouteHandleTestUtil.h"
 
@@ -46,8 +44,8 @@ void sendRequest(
 }
 
 TEST(oustandingLimitRouteTest, basic) {
-  auto normalHandle =
-      std::make_shared<TestHandle>(GetRouteTestData(mc_res_found, "a"));
+  auto normalHandle = std::make_shared<TestHandle>(
+      GetRouteTestData(carbon::Result::FOUND, "a"));
 
   McrouterRouteHandle<OutstandingLimitRoute<McrouterRouterInfo>> rh(
       normalHandle->rh, 3);

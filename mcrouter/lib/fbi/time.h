@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 /** timeval inline functions */
@@ -35,9 +33,9 @@ static inline void timeval_sub(timeval_t* a, const timeval_t* b) {
 }
 
 static inline int timeval_cmp(const timeval_t* a, const timeval_t* b) {
-  return a->tv_sec > b->tv_sec
-      ? 1
-      : a->tv_sec < b->tv_sec ? -1 : a->tv_usec - b->tv_usec;
+  return a->tv_sec > b->tv_sec ? 1
+      : a->tv_sec < b->tv_sec  ? -1
+                               : a->tv_usec - b->tv_usec;
 }
 
 static inline int timeval_lt(const timeval_t* a, const timeval_t* b) {

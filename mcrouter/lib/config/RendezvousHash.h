@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <stdexcept>
@@ -28,6 +26,7 @@ class RendezvousHash {
    */
   template <class Iterator>
   RendezvousHash(Iterator begin, Iterator end) {
+    nodes_.reserve(std::distance(begin, end));
     for (auto it = begin; it != end; ++it) {
       if (it->second < 0.0) {
         throw std::invalid_argument("Weight should be greater than 0");
@@ -56,5 +55,5 @@ class RendezvousHash {
    */
   void normalizeWeights();
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <arpa/inet.h>
 
 #include "mcrouter/lib/fbi/cpp/util.h"
@@ -69,7 +67,7 @@ class CallbackWrapper<Callback, List<Request, Requests...>>
   }
 };
 
-} // detail
+} // namespace detail
 
 template <class T>
 T McClientAsciiParser::getReply() {
@@ -87,6 +85,12 @@ void McClientAsciiParser::initializeReplyParser<McGetsRequest>();
 
 template <>
 void McClientAsciiParser::initializeReplyParser<McLeaseGetRequest>();
+
+template <>
+void McClientAsciiParser::initializeReplyParser<McGatRequest>();
+
+template <>
+void McClientAsciiParser::initializeReplyParser<McGatsRequest>();
 
 template <>
 void McClientAsciiParser::initializeReplyParser<McSetRequest>();
@@ -182,14 +186,14 @@ template <class Reply>
 void McClientAsciiParser::consumeErrorMessage(const folly::IOBuf&) {
   auto& message = currentMessage_.get<Reply>();
 
-  message.message().push_back(*p_);
+  message.message_ref()->push_back(*p_);
 }
 
 template <class Reply>
 void McClientAsciiParser::consumeVersion(const folly::IOBuf& buffer) {
   auto& message = currentMessage_.get<Reply>();
 
-  appendCurrentCharTo(buffer, message.value(), p_);
+  appendCurrentCharTo(buffer, *message.value_ref(), p_);
 }
 
 template <class Reply>
@@ -197,16 +201,17 @@ void McClientAsciiParser::consumeIpAddr(const folly::IOBuf& /* buffer */) {
   auto& message = currentMessage_.get<Reply>();
   char inAddrBuf[sizeof(struct in6_addr)];
   // Max ip address length is INET6_ADDRSTRLEN - 1 chars.
-  if (message.ipAddress().size() < INET6_ADDRSTRLEN) {
+  if (message.ipAddress_ref()->size() < INET6_ADDRSTRLEN) {
     char addr[INET6_ADDRSTRLEN] = {0};
-    memcpy(addr, message.ipAddress().data(), message.ipAddress().size());
+    memcpy(
+        addr, message.ipAddress_ref()->data(), message.ipAddress_ref()->size());
     if (strchr(addr, ':') == nullptr) {
       if (inet_pton(AF_INET, addr, inAddrBuf) > 0) {
-        message.ipv() = 4;
+        message.ipv_ref() = 4;
       }
     } else {
       if (inet_pton(AF_INET6, addr, inAddrBuf) > 0) {
-        message.ipv() = 6;
+        message.ipv_ref() = 6;
       }
     }
   }
@@ -216,7 +221,7 @@ template <class Reply>
 void McClientAsciiParser::consumeIpAddrHelper(const folly::IOBuf&) {
   auto& message = currentMessage_.get<Reply>();
 
-  message.ipAddress().push_back(*p_);
+  message.ipAddress_ref()->push_back(*p_);
 }
 
 inline void McClientAsciiParser::initFirstCharIOBuf(
@@ -247,7 +252,7 @@ inline void McClientAsciiParser::appendCurrentCharTo(
 
 template <class Reply>
 void McClientAsciiParser::resetErrorMessage(Reply& message) {
-  message.message().clear();
+  message.message_ref()->clear();
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

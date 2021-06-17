@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "options.h"
 
 #include <string>
@@ -99,7 +97,7 @@ to(const string& s) {
   return result;
 }
 
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -121,10 +119,13 @@ string toString(const boost::any& value) {
   string res;
   bool ok = tryToString<int64_t>(value, res) || tryToString<int>(value, res) ||
       tryToString<uint32_t>(value, res) || tryToString<size_t>(value, res) ||
+      tryToString<uint16_t>(value, res) ||
       tryToString<unsigned int>(value, res) ||
       tryToString<double>(value, res) || tryToString<bool>(value, res) ||
-      tryToString<string>(value, res) ||
       tryToString<vector<uint16_t>>(value, res) ||
+      tryToString<vector<int16_t>>(value, res) ||
+      tryToString<string>(value, res) ||
+      tryToString<vector<string>>(value, res) ||
       tryToString<mcrouter::RoutingPrefix>(value, res) ||
       tryToString<unordered_map<string, string>>(value, res);
   checkLogic(ok, "Unsupported option type: {}", value.type().name());
@@ -144,11 +145,13 @@ bool tryFromString(const string& str, const boost::any& value) {
 void fromString(const string& str, const boost::any& value) {
   bool ok = tryFromString<int64_t>(str, value) ||
       tryFromString<int>(str, value) || tryFromString<uint32_t>(str, value) ||
+      tryFromString<uint16_t>(str, value) ||
       tryFromString<size_t>(str, value) ||
       tryFromString<unsigned int>(str, value) ||
       tryFromString<double>(str, value) || tryFromString<bool>(str, value) ||
       tryFromString<string>(str, value) ||
       tryFromString<vector<uint16_t>>(str, value) ||
+      tryFromString<vector<string>>(str, value) ||
       tryFromString<mcrouter::RoutingPrefix>(str, value) ||
       tryFromString<unordered_map<string, string>>(str, value);
 
@@ -179,9 +182,9 @@ unordered_map<string, string> McrouterOptionsBase::toDict() const {
   unordered_map<string, string> ret;
 
   forEach([&ret](
-      const string& name, McrouterOptionData::Type, const boost::any& value) {
-    ret[name] = toString(value);
-  });
+              const string& name,
+              McrouterOptionData::Type,
+              const boost::any& value) { ret[name] = toString(value); });
 
   return ret;
 }
@@ -192,9 +195,9 @@ vector<McrouterOptionError> McrouterOptionsBase::updateFromDict(
   unordered_set<string> seen;
 
   forEach([&errors, &seen, &new_opts](
-      const string& name,
-      McrouterOptionData::Type type,
-      const boost::any& value) {
+              const string& name,
+              McrouterOptionData::Type type,
+              const boost::any& value) {
     auto it = new_opts.find(name);
     if (it != new_opts.end()) {
       auto subValue = options::substituteTemplates(it->second);
@@ -251,6 +254,6 @@ string substituteTemplates(string str) {
   return mcrouter::performOptionSubstitution(std::move(str));
 }
 
-} // facebook::memcache::options
-}
-} // facebook::memcache
+} // namespace options
+} // namespace memcache
+} // namespace facebook

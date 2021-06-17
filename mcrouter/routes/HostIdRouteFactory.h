@@ -1,16 +1,14 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
-#include <folly/Hash.h>
 #include <folly/dynamic.h>
+#include <folly/hash/Hash.h>
 
 #include "mcrouter/lib/config/RouteHandleBuilder.h"
 #include "mcrouter/lib/config/RouteHandleFactory.h"
@@ -37,7 +35,7 @@ typename RouterInfo::RouteHandlePtr makeHostIdRoute(
   return std::move(rh[hostIdHash % rh.size()]);
 }
 
-} // detail
+} // namespace detail
 
 template <class RouterInfo>
 typename RouterInfo::RouteHandlePtr makeHostIdRoute(
@@ -59,6 +57,6 @@ typename RouterInfo::RouteHandlePtr makeHostIdRoute(
 
   return detail::makeHostIdRoute<RouterInfo>(std::move(children), salt);
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "ProxyConfigBuilder.h"
 
 #include <folly/json.h>
@@ -39,6 +37,7 @@ ProxyConfigBuilder::ProxyConfigBuilder(
       {"router-name", opts.router_name},
       {"service-name", opts.service_name}};
   auto additionalParams = additionalConfigParams();
+  folly::json::metadata_map configMetadataMap;
   for (auto& it : additionalParams) {
     globalParams.emplace(it.first, std::move(it.second));
   }
@@ -47,12 +46,13 @@ ProxyConfigBuilder::ProxyConfigBuilder(
   }
 
   json_ = ConfigPreprocessor::getConfigWithoutMacros(
-      jsonC, importResolver, std::move(globalParams));
+      jsonC, importResolver, std::move(globalParams), &configMetadataMap);
 
-  poolFactory_ = std::make_unique<PoolFactory>(json_, configApi);
+  poolFactory_ = std::make_unique<PoolFactory>(
+      json_, configApi, std::move(configMetadataMap));
 
   configMd5Digest_ = Md5Hash(jsonC);
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

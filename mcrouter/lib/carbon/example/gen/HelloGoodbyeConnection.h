@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -51,8 +49,7 @@ class HelloGoodbyeConnection {
       std::vector<std::reference_wrapper<const HelloRequest>>&&,
       carbon::RequestCb<HelloRequest>) = 0;
 
-  virtual facebook::memcache::CacheClientCounters getStatCounters() const
-      noexcept = 0;
+  virtual facebook::memcache::CacheClientCounters getStatCounters() const noexcept = 0;
   virtual std::unordered_map<std::string, std::string> getConfigOptions() = 0;
   virtual bool healthCheck() = 0;
   virtual std::unique_ptr<HelloGoodbyeConnection> recreate() = 0;
@@ -109,11 +106,10 @@ class HelloGoodbyeConnectionImpl : public HelloGoodbyeConnection {
   Impl impl_;
 };
 
-using HelloGoodbyePooledConnection = HelloGoodbyeConnectionImpl<
-    carbon::PooledCarbonConnectionImpl<HelloGoodbyeConnection>>;
-using HelloGoodbyeInternalConnection = HelloGoodbyeConnectionImpl<
-    carbon::InternalCarbonConnectionImpl<HelloGoodbyeConnection>>;
+using HelloGoodbyePooledConnection =
+    HelloGoodbyeConnectionImpl<carbon::PooledCarbonConnectionImpl<HelloGoodbyeConnection>>;
+using HelloGoodbyeInternalConnection =
+    HelloGoodbyeConnectionImpl<carbon::InternalCarbonConnectionImpl<HelloGoodbyeConnection>>;
 using HelloGoodbyeExternalConnection =
-    HelloGoodbyeConnectionImpl<carbon::ExternalCarbonConnectionImpl>;
-
+    HelloGoodbyeConnectionImpl<carbon::ExternalCarbonConnectionImpl<HelloGoodbyeRouterInfo>>;
 } // namespace hellogoodbye

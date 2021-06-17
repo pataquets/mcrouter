@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -18,38 +16,58 @@
 namespace carbon {
 namespace test {
 
+template <class Writer>
+void BaseStruct::serialize(Writer&& writer) const {
+  writer.writeStructBegin();
+  writer.writeField(1 /* field id */, baseInt64Member());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
+}
+
 template <class V>
 void BaseStruct::visitFields(V&& v) {
-  if (!v.visitField(1, "baseInt64Member", baseInt64Member_)) {
+  if (!v.visitField(1, "baseInt64Member", this->baseInt64Member())) {
     return;
   }
 }
 
 template <class V>
 void BaseStruct::visitFields(V&& v) const {
-  if (!v.visitField(1, "baseInt64Member", baseInt64Member_)) {
+  if (!v.visitField(1, "baseInt64Member", this->baseInt64Member())) {
     return;
   }
+}
+
+template <class Writer>
+void SimpleStruct::serialize(Writer&& writer) const {
+  writer.writeStructBegin();
+  writer.writeField(-1 /* field id */, asBaseStruct());
+  writer.writeField(1 /* field id */, int32Member());
+  writer.writeField(2 /* field id */, stringMember());
+  writer.writeField(3 /* field id */, enumMember());
+  writer.writeField(4 /* field id */, vectorMember());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
 }
 
 template <class V>
 void SimpleStruct::visitFields(V&& v) {
   if (v.enterMixin(1, "BaseStruct", _carbon_basestruct_)) {
-    _carbon_basestruct_.visitFields(std::forward<V>(v));
+    this->_carbon_basestruct_.visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "int32Member", int32Member_)) {
+  if (!v.visitField(1, "int32Member", this->int32Member())) {
     return;
   }
-  if (!v.visitField(2, "stringMember", stringMember_)) {
+  if (!v.visitField(2, "stringMember", this->stringMember())) {
     return;
   }
-  if (!v.visitField(3, "enumMember", enumMember_)) {
+  if (!v.visitField(3, "enumMember", this->enumMember())) {
     return;
   }
-  if (!v.visitField(4, "vectorMember", vectorMember_)) {
+  if (!v.visitField(4, "vectorMember", this->vectorMember())) {
     return;
   }
 }
@@ -57,24 +75,23 @@ void SimpleStruct::visitFields(V&& v) {
 template <class V>
 void SimpleStruct::visitFields(V&& v) const {
   if (v.enterMixin(1, "BaseStruct", _carbon_basestruct_)) {
-    _carbon_basestruct_.visitFields(std::forward<V>(v));
+    this->_carbon_basestruct_.visitFields(std::forward<V>(v));
   }
   if (!v.leaveMixin()) {
     return;
   }
-  if (!v.visitField(1, "int32Member", int32Member_)) {
+  if (!v.visitField(1, "int32Member", this->int32Member())) {
     return;
   }
-  if (!v.visitField(2, "stringMember", stringMember_)) {
+  if (!v.visitField(2, "stringMember", this->stringMember())) {
     return;
   }
-  if (!v.visitField(3, "enumMember", enumMember_)) {
+  if (!v.visitField(3, "enumMember", this->enumMember())) {
     return;
   }
-  if (!v.visitField(4, "vectorMember", vectorMember_)) {
+  if (!v.visitField(4, "vectorMember", this->vectorMember())) {
     return;
   }
 }
-
 } // namespace test
 } // namespace carbon

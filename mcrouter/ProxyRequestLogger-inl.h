@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "mcrouter/McrouterFiberContext.h"
 #include "mcrouter/Proxy.h"
 #include "mcrouter/ProxyBase.h"
@@ -35,7 +33,30 @@ void ProxyRequestLogger<RouterInfo>::log(
 
   const auto durationUs = loggerContext.endTimeUs - loggerContext.startTimeUs;
   proxy_.stats().durationUs().insertSample(durationUs);
+  logDurationByRequestType<Request>(durationUs);
 }
+
+template <class RouterInfo>
+template <class Request>
+void ProxyRequestLogger<RouterInfo>::logDurationByRequestType(
+    uint64_t durationUs,
+    carbon::GetLikeT<Request>) {
+  proxy_.stats().durationGetUs().insertSample(durationUs);
+}
+
+template <class RouterInfo>
+template <class Request>
+void ProxyRequestLogger<RouterInfo>::logDurationByRequestType(
+    uint64_t durationUs,
+    carbon::UpdateLikeT<Request>) {
+  proxy_.stats().durationUpdateUs().insertSample(durationUs);
+}
+
+template <class RouterInfo>
+template <class Request>
+void ProxyRequestLogger<RouterInfo>::logDurationByRequestType(
+    uint64_t /* durationUs */,
+    carbon::OtherThanT<Request, carbon::GetLike<>, carbon::UpdateLike<>>) {}
 
 #define REQUEST_CLASS_ERROR_STATS(proxy, ERROR, reqClass)     \
   do {                                                        \
@@ -49,7 +70,7 @@ void ProxyRequestLogger<RouterInfo>::log(
 
 template <class RouterInfo>
 void ProxyRequestLogger<RouterInfo>::logError(
-    mc_res_t result,
+    carbon::Result result,
     RequestClass reqClass) {
   if (isErrorResult(result)) {
     REQUEST_CLASS_ERROR_STATS(proxy_, error, reqClass);
@@ -69,11 +90,20 @@ void ProxyRequestLogger<RouterInfo>::logError(
   if (isTkoResult(result)) {
     REQUEST_CLASS_ERROR_STATS(proxy_, tko, reqClass);
   }
+  if (isRemoteErrorResult(result)) {
+    REQUEST_CLASS_ERROR_STATS(proxy_, remote_error, reqClass);
+  }
   if (isLocalErrorResult(result)) {
     REQUEST_CLASS_ERROR_STATS(proxy_, local_error, reqClass);
   }
+  if (isClientErrorResult(result)) {
+    REQUEST_CLASS_ERROR_STATS(proxy_, client_error, reqClass);
+  }
+  if (isDeadlineExceededResult(result)) {
+    REQUEST_CLASS_ERROR_STATS(proxy_, deadline_exceeded_error, reqClass);
+  }
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <folly/Range.h>
 #include <folly/fibers/EventBaseLoopController.h>
 
@@ -15,7 +13,7 @@
 #include "mcrouter/lib/MessageQueue.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/carbon/Stats.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/options.h"
 #include "mcrouter/routes/ProxyRoute.h"
 #include "mcrouter/stats.h"
@@ -30,37 +28,22 @@ class ProxyConfig;
 namespace detail {
 
 template <class RouterInfo>
-bool processGetServiceInfoRequestImpl(
+bool processGetServiceInfoRequest(
     const McGetRequest& req,
     std::shared_ptr<ProxyRequestContextTyped<RouterInfo, McGetRequest>>& ctx) {
   constexpr folly::StringPiece kInternalGetPrefix("__mcrouter__.");
 
-  if (!req.key().fullKey().startsWith(kInternalGetPrefix)) {
+  if (!req.key_ref()->fullKey().startsWith(kInternalGetPrefix)) {
     return false;
   }
   auto& config = ctx->proxyConfig();
-  auto key = req.key().fullKey();
+  auto key = req.key_ref()->fullKey();
   key.advance(kInternalGetPrefix.size());
   config.serviceInfo()->handleRequest(key, ctx);
   return true;
 }
 
-template <class RouterInfo>
-bool processGetServiceInfoRequest(
-    const McGetRequest& req,
-    std::shared_ptr<ProxyRequestContextTyped<RouterInfo, McGetRequest>>& ctx) {
-  return processGetServiceInfoRequestImpl(req, ctx);
-}
-
-template <class RouterInfo, class Request>
-typename std::enable_if<!std::is_same<Request, McGetRequest>::value, bool>::type
-processGetServiceInfoRequest(
-    const Request&,
-    std::shared_ptr<ProxyRequestContextTyped<RouterInfo, Request>>&) {
-  return false;
-}
-
-} // detail
+} // namespace detail
 
 template <class RouterInfo>
 template <class Request>
@@ -79,9 +62,10 @@ void Proxy<RouterInfo>::WaitingRequest<Request>::process(
     const auto durationInQueueUs = nowUs() - timePushedOnQueue_;
 
     if (durationInQueueUs >
-        1000 * static_cast<int64_t>(
-                   proxy->getRouterOptions().waiting_request_timeout_ms)) {
-      ctx_->sendReply(mc_res_busy);
+        1000 *
+            static_cast<int64_t>(
+                proxy->getRouterOptions().waiting_request_timeout_ms)) {
+      ctx_->sendReply(carbon::Result::BUSY);
       return;
     }
   }
@@ -91,25 +75,17 @@ void Proxy<RouterInfo>::WaitingRequest<Request>::process(
 
 template <class RouterInfo>
 template <class Request>
-typename std::enable_if<
-    ListContains<typename RouterInfo::RoutableRequests, Request>::value,
-    void>::type
-Proxy<RouterInfo>::routeHandlesProcessRequest(
+typename std::enable_if_t<
+    ListContains<typename RouterInfo::RoutableRequests, Request>::value>
+Proxy<RouterInfo>::addRouteTask(
     const Request& req,
-    std::unique_ptr<ProxyRequestContextTyped<RouterInfo, Request>> uctx) {
+    std::shared_ptr<ProxyRequestContextTyped<RouterInfo, Request>> sharedCtx) {
   requestStats_.template bump<Request>(carbon::RouterStatTypes::Incoming);
-
-  auto sharedCtx = ProxyRequestContextTyped<RouterInfo, Request>::process(
-      std::move(uctx), getConfigUnsafe());
-
-  if (detail::processGetServiceInfoRequest(req, sharedCtx)) {
-    return;
-  }
 
   auto funcCtx = sharedCtx;
 
   fiberManager().addTaskFinally(
-      [&req, ctx = std::move(funcCtx) ]() mutable {
+      [&req, ctx = std::move(funcCtx)]() mutable {
         try {
           auto& proute = ctx->proxyRoute();
           fiber_local<RouterInfo>::setSharedCtx(std::move(ctx));
@@ -120,25 +96,24 @@ Proxy<RouterInfo>::routeHandlesProcessRequest(
               " Exception: {}",
               typeid(Request).name(),
               e.what());
-          ReplyT<Request> reply(mc_res_local_error);
+          ReplyT<Request> reply(carbon::Result::LOCAL_ERROR);
           carbon::setMessageIfPresent(reply, std::move(err));
           return reply;
         }
       },
-      [ctx = std::move(sharedCtx)](folly::Try<ReplyT<Request>> && reply) {
+      [ctx = std::move(sharedCtx)](folly::Try<ReplyT<Request>>&& reply) {
         ctx->sendReply(std::move(*reply));
       });
 }
 
 template <class RouterInfo>
 template <class Request>
-typename std::enable_if<
-    !ListContains<typename RouterInfo::RoutableRequests, Request>::value,
-    void>::type
-Proxy<RouterInfo>::routeHandlesProcessRequest(
+typename std::enable_if_t<
+    !ListContains<typename RouterInfo::RoutableRequests, Request>::value>
+Proxy<RouterInfo>::addRouteTask(
     const Request&,
-    std::unique_ptr<ProxyRequestContextTyped<RouterInfo, Request>> uctx) {
-  ReplyT<Request> reply(mc_res_local_error);
+    std::shared_ptr<ProxyRequestContextTyped<RouterInfo, Request>> sharedCtx) {
+  ReplyT<Request> reply(carbon::Result::LOCAL_ERROR);
   carbon::setMessageIfPresent(
       reply,
       folly::sformat(
@@ -146,7 +121,18 @@ Proxy<RouterInfo>::routeHandlesProcessRequest(
           "because the operation is not supported by RouteHandles "
           "library!",
           typeid(Request).name()));
-  uctx->sendReply(std::move(reply));
+  sharedCtx->sendReply(std::move(reply));
+}
+
+template <class RouterInfo>
+template <class Request>
+void Proxy<RouterInfo>::routeHandlesProcessRequest(
+    const Request& req,
+    std::unique_ptr<ProxyRequestContextTyped<RouterInfo, Request>> uctx) {
+  auto sharedCtx = ProxyRequestContextTyped<RouterInfo, Request>::process(
+      std::move(uctx), getConfigUnsafe());
+
+  addRouteTask(req, std::move(sharedCtx));
 }
 
 template <class RouterInfo>
@@ -158,7 +144,10 @@ void Proxy<RouterInfo>::processRequest(
   ctx->markAsProcessing();
   ++numRequestsProcessing_;
   stats().increment(proxy_reqs_processing_stat);
-
+  if (UNLIKELY(req.getCryptoAuthToken().has_value())) {
+    stats().increment(request_has_crypto_auth_token_stat);
+  }
+  ctx->runPreprocessFunction();
   routeHandlesProcessRequest(req, std::move(ctx));
 
   stats().increment(request_sent_stat);
@@ -174,7 +163,7 @@ void Proxy<RouterInfo>::dispatchRequest(
     if (getRouterOptions().proxy_max_throttled_requests > 0 &&
         numRequestsWaiting_ >=
             getRouterOptions().proxy_max_throttled_requests) {
-      ctx->sendReply(mc_res_busy);
+      ctx->sendReply(carbon::Result::BUSY);
       return;
     }
     auto& queue = waitingRequests_[static_cast<int>(ctx->priority())];
@@ -252,11 +241,10 @@ Proxy<RouterInfo>* Proxy<RouterInfo>::createProxy(
   });
 
   // We want proxy life-time to be tied to VirtualEventBase.
-  eventBase.runOnDestruction(new folly::EventBase::FunctionLoopCallback(
-      [proxy = std::move(proxy)]() mutable {
-        /* make sure proxy is deleted on the proxy thread */
-        proxy.reset();
-      }));
+  eventBase.runOnDestruction([proxy = std::move(proxy)]() mutable {
+    /* make sure proxy is deleted on the proxy thread */
+    proxy.reset();
+  });
 
   return proxyPtr;
 }
@@ -264,24 +252,26 @@ Proxy<RouterInfo>* Proxy<RouterInfo>::createProxy(
 template <class RouterInfo>
 std::shared_ptr<ProxyConfig<RouterInfo>> Proxy<RouterInfo>::getConfigUnsafe()
     const {
-  std::lock_guard<SFRReadLock> lg(const_cast<SFRLock&>(configLock_).readLock());
+  folly::SharedMutex::ReadHolder lg(configLock_);
   return config_;
 }
 
 template <class RouterInfo>
-std::pair<std::unique_lock<SFRReadLock>, ProxyConfig<RouterInfo>&>
+std::pair<
+    std::unique_ptr<folly::SharedMutex::ReadHolder>,
+    ProxyConfig<RouterInfo>&>
 Proxy<RouterInfo>::getConfigLocked() const {
-  std::unique_lock<SFRReadLock> lock(
-      const_cast<SFRLock&>(configLock_).readLock());
+  auto lock = std::make_unique<folly::SharedMutex::ReadHolder>(configLock_);
   /* make_pair strips the reference, so construct directly */
-  return std::pair<std::unique_lock<SFRReadLock>, ProxyConfig<RouterInfo>&>(
-      std::move(lock), *config_);
+  return std::pair<
+      std::unique_ptr<folly::SharedMutex::ReadHolder>,
+      ProxyConfig<RouterInfo>&>(std::move(lock), *config_);
 }
 
 template <class RouterInfo>
 std::shared_ptr<ProxyConfig<RouterInfo>> Proxy<RouterInfo>::swapConfig(
     std::shared_ptr<ProxyConfig<RouterInfo>> newConfig) {
-  std::lock_guard<SFRWriteLock> lg(configLock_.writeLock());
+  folly::SharedMutex::WriteHolder lg(configLock_);
   auto old = std::move(config_);
   config_ = std::move(newConfig);
   return old;
@@ -326,6 +316,12 @@ void Proxy<RouterInfo>::messageReady(ProxyMessage::Type t, void* data) {
       delete oldConfig;
     } break;
 
+    case ProxyMessage::Type::REPLACE_AP: {
+      auto rep = reinterpret_cast<replace_ap_t*>(data);
+      processReplaceMessage(rep);
+      rep->baton.post();
+    } break;
+
     case ProxyMessage::Type::SHUTDOWN:
       /*
        * No-op. We just wanted to wake this event base up so that
@@ -339,7 +335,15 @@ template <class RouterInfo>
 void Proxy<RouterInfo>::routeHandlesProcessRequest(
     const McStatsRequest& req,
     std::unique_ptr<ProxyRequestContextTyped<RouterInfo, McStatsRequest>> ctx) {
-  ctx->sendReply(stats_reply(this, req.key().fullKey()));
+  McStatsReply reply;
+  try {
+    reply = stats_reply(this, req.key_ref()->fullKey());
+  } catch (const std::exception& e) {
+    reply.result_ref() = carbon::Result::LOCAL_ERROR;
+    reply.message_ref() =
+        folly::to<std::string>("Error processing stats request: ", e.what());
+  }
+  ctx->sendReply(std::move(reply));
 }
 
 template <class RouterInfo>
@@ -347,10 +351,24 @@ void Proxy<RouterInfo>::routeHandlesProcessRequest(
     const McVersionRequest&,
     std::unique_ptr<ProxyRequestContextTyped<RouterInfo, McVersionRequest>>
         ctx) {
-  McVersionReply reply(mc_res_ok);
-  reply.value() =
+  McVersionReply reply(carbon::Result::OK);
+  reply.value_ref() =
       folly::IOBuf(folly::IOBuf::COPY_BUFFER, MCROUTER_PACKAGE_STRING);
   ctx->sendReply(std::move(reply));
+}
+
+template <class RouterInfo>
+void Proxy<RouterInfo>::routeHandlesProcessRequest(
+    const McGetRequest& req,
+    std::unique_ptr<ProxyRequestContextTyped<RouterInfo, McGetRequest>> uctx) {
+  auto sharedCtx = ProxyRequestContextTyped<RouterInfo, McGetRequest>::process(
+      std::move(uctx), getConfigUnsafe());
+
+  if (detail::processGetServiceInfoRequest(req, sharedCtx)) {
+    return;
+  }
+
+  addRouteTask(req, std::move(sharedCtx));
 }
 
 template <class RouterInfo>
@@ -407,6 +425,46 @@ Proxy<RouterInfo>::rateLimited(ProxyRequestPriority priority, const Request&)
   return true;
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+template <class RouterInfo>
+bool Proxy<RouterInfo>::messageQueueFull() const noexcept {
+  return messageQueue_->isFull();
+}
+
+template <class RouterInfo>
+void Proxy<RouterInfo>::processReplaceMessage(replace_ap_t* rep) {
+  rep->replacedAccessPoint = nullptr;
+  if (rep->oldAccessPoint.getProtocol() == mc_thrift_protocol) {
+    rep->replacedAccessPoint =
+        destinationMap_->replace<ThriftTransport<RouterInfo>>(
+            rep->oldAccessPoint,
+            rep->newAccessPoint,
+            std::chrono::milliseconds(0));
+  } else if (rep->oldAccessPoint.getProtocol() == mc_caret_protocol) {
+    rep->replacedAccessPoint = destinationMap_->replace<AsyncMcClient>(
+        rep->oldAccessPoint, rep->newAccessPoint, std::chrono::milliseconds(0));
+  }
+}
+
+template <class RouterInfo>
+std::shared_ptr<const AccessPoint> Proxy<RouterInfo>::replaceAP(
+    const AccessPoint& oldAP,
+    std::shared_ptr<const AccessPoint> newAP) {
+  // Send message to replace AP in the ProxyDestination
+  try {
+    auto repMsg = std::make_unique<replace_ap_t>(oldAP, newAP);
+    sendMessage(ProxyMessage::Type::REPLACE_AP, repMsg.get());
+    // wait for the response
+    repMsg->baton.wait();
+    auto replacedAP = repMsg->replacedAccessPoint;
+    VLOG(2) << ((replacedAP != nullptr) ? "SUCCESS " : "FAILED ")
+            << " Replacing oldAP = " << oldAP.toString()
+            << " newAP = " << newAP->toString();
+    return replacedAP;
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

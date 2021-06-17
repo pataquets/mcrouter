@@ -1,20 +1,14 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <inttypes.h>
 #include <stdint.h>
-
-#include "mcrouter/lib/fbi/decls.h"
-
-__BEGIN_DECLS
 
 #define SERVER_ERROR_BUSY 307
 
@@ -52,6 +46,8 @@ typedef enum mc_op_e {
   mc_op_gets,
   mc_op_get_service_info, ///< Queries various service state
   mc_op_touch,
+  mc_op_gat,
+  mc_op_gats,
   mc_nops // placeholder
 } mc_op_t;
 
@@ -114,6 +110,10 @@ static inline const char* mc_op_to_string(const mc_op_t op) {
       return "gets";
     case mc_op_get_service_info:
       return "get-service-info";
+    case mc_op_gat:
+      return "gat";
+    case mc_op_gats:
+      return "gats";
     case mc_nops:
       return "unknown";
   };
@@ -166,6 +166,7 @@ typedef enum mc_res_e {
   mc_res_remote_error,
   /* in progress -- */
   mc_res_waiting,
+  mc_res_deadline_exceeded,
   mc_nres // placeholder
 } mc_res_t;
 
@@ -238,6 +239,8 @@ static inline const char* mc_res_to_string(const mc_res_t result) {
     /* in progress -- */
     case mc_res_waiting:
       return "mc_res_waiting";
+    case mc_res_deadline_exceeded:
+      return "mc_res_deadline_exceeded";
     case mc_nres:
       return "mc_res_unknown";
   }
@@ -261,6 +264,9 @@ enum mc_msg_flags_t {
   MC_MSG_FLAG_NEGATIVE_CACHE = 0x10000,
   MC_MSG_FLAG_HOT_KEY = 0x20000,
   MC_MSG_FLAG_ZSTD_COMPRESSED = 0x40000,
+  MC_MSG_FLAG_MANAGED_COMPRESSION_COMPRESSED = 0x80000,
+  MC_MSG_FLAG_VARRAY_DARRAY_SERIALIZED = 0x100000,
+  MC_MSG_FLAG_POST_HAM_SERIALIZED = 0x200000,
   /* Bits reserved for application-specific extension flags: */
   MC_MSG_FLAG_USER_1 = 0x100000000LL,
   MC_MSG_FLAG_USER_2 = 0x200000000LL,
@@ -306,6 +312,12 @@ static inline const char* mc_flag_to_string(const enum mc_msg_flags_t flag) {
       return "NEGATIVE_CACHE";
     case MC_MSG_FLAG_ZSTD_COMPRESSED:
       return "ZSTD_COMPRESSED";
+    case MC_MSG_FLAG_MANAGED_COMPRESSION_COMPRESSED:
+      return "MANAGED_COMPRESSION_COMPRESSED";
+    case MC_MSG_FLAG_VARRAY_DARRAY_SERIALIZED:
+      return "VARRAY_DARRAY_SERIALIZED";
+    case MC_MSG_FLAG_POST_HAM_SERIALIZED:
+      return "POST_HAM_SERIALIZED";
     case MC_MSG_FLAG_HOT_KEY:
       return "HOT_KEY";
     case MC_MSG_FLAG_USER_1:
@@ -362,6 +374,8 @@ static inline int mc_op_has_key(mc_op_t op) {
     case mc_op_decr:
     case mc_op_metaget:
     case mc_op_gets:
+    case mc_op_gat:
+    case mc_op_gats:
       return 1;
 
     default:
@@ -385,10 +399,6 @@ static inline int mc_op_has_value(mc_op_t op) {
   }
 }
 
-static inline int mc_res_is_err(const mc_res_t result) {
-  return result >= mc_res_ooo && result < mc_res_waiting;
-}
-
 typedef enum mc_req_err_s {
   mc_req_err_valid,
   mc_req_err_no_key,
@@ -399,10 +409,8 @@ typedef enum mc_req_err_s {
 const char* mc_req_err_to_string(const mc_req_err_t err);
 
 /**
- * @param result Result code
+ * @param result string like 'mc_res_notfound'
  *
- * @return Human-readable ASCII string for result.
+ * @return mc_res_t code
  */
-const char* mc_res_to_response_string(const mc_res_t result);
-
-__END_DECLS
+mc_res_t mc_res_from_string(const char* result);

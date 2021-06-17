@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -17,7 +15,8 @@
 
 #include "mcrouter/ProxyRequestPriority.h"
 #include "mcrouter/config-impl.h"
-#include "mcrouter/lib/mc/msg.h"
+#include "mcrouter/lib/PoolContext.h"
+#include "mcrouter/lib/carbon/Result.h"
 
 namespace facebook {
 namespace memcache {
@@ -35,12 +34,6 @@ class ProxyBase;
 class CarbonRouterClientBase;
 class ShardSplitter;
 
-struct PoolContext {
-  folly::StringPiece poolName;
-  size_t indexInPool;
-  bool isShadow;
-};
-
 /**
  * This object is alive for the duration of user's request,
  * including any subrequests that might have been sent out.
@@ -56,7 +49,7 @@ class ProxyRequestContext {
  public:
   using ClientCallback =
       std::function<void(const PoolContext&, const AccessPoint&)>;
-  using ShardSplitCallback = std::function<void(const ShardSplitter&)>;
+  using ShardSplitCallback = std::function<void(const ShardSplitter&, bool)>;
 
   virtual ~ProxyRequestContext();
 
@@ -75,9 +68,9 @@ class ProxyRequestContext {
     }
   }
 
-  void recordShardSplitter(const ShardSplitter& splitter) const {
+  void recordShardSplitter(const ShardSplitter& splitter, bool isShadow) const {
     if (recording_ && recordingState_->shardSplitCallback) {
-      recordingState_->shardSplitCallback(splitter);
+      recordingState_->shardSplitCallback(splitter, isShadow);
     }
   }
 
@@ -87,6 +80,12 @@ class ProxyRequestContext {
 
   bool failoverDisabled() const {
     return failoverDisabled_;
+  }
+
+  void setPoolStatsIndex(int32_t index) {
+    if (poolStatIndex_ == -1) {
+      poolStatIndex_ = index;
+    }
   }
 
   ProxyRequestPriority priority() const {
@@ -122,12 +121,43 @@ class ProxyRequestContext {
     requester_ = std::move(requester);
   }
 
-  void setFinalResult(mc_res_t result) {
+  void setFinalResult(carbon::Result result) {
     finalResult_ = result;
   }
 
-  mc_res_t finalResult() const {
+  carbon::Result finalResult() const {
     return finalResult_;
+  }
+
+  /**
+   * Set preprocess function.
+   */
+  void setPreprocessFunction(std::function<void()>&& f) {
+    mcrouterPreprocess_ = f;
+  }
+
+  /**
+   * Run preprocess function.
+   */
+  void runPreprocessFunction() const {
+    if (UNLIKELY(mcrouterPreprocess_ != nullptr)) {
+      mcrouterPreprocess_();
+    }
+  }
+
+  /**
+   * Set RequestContextScopeGuard to create folly::RequestContext.
+   */
+  void setRequestContextScopeGuard(
+      std::unique_ptr<folly::ShallowCopyRequestContextScopeGuard> guard) {
+    reqContextScopeGuard_ = std::move(guard);
+  }
+
+  /**
+   * Destroy RequestContextScopeGuard to destroy folly::RequestContext.
+   */
+  void destroyRequestContextScopeGuard() {
+    reqContextScopeGuard_.reset();
   }
 
  protected:
@@ -137,7 +167,8 @@ class ProxyRequestContext {
    * Guaranteed to be called after enqueueReply_ (right after in sync mode).
    */
   void (*reqComplete_)(ProxyRequestContext& preq){nullptr};
-  mc_res_t finalResult_{mc_res_unknown};
+  carbon::Result finalResult_{carbon::Result::UNKNOWN};
+  int32_t poolStatIndex_{-1};
   bool replied_{false};
 
   ProxyRequestContext(ProxyBase& pr, ProxyRequestPriority priority__);
@@ -176,6 +207,13 @@ class ProxyRequestContext {
   bool processing_{false};
   bool recording_{false};
 
+  /**
+   * Functions to be executed before actual processing code.
+   */
+  std::function<void()> mcrouterPreprocess_{nullptr};
+  std::unique_ptr<folly::ShallowCopyRequestContextScopeGuard>
+      reqContextScopeGuard_{nullptr};
+
   ProxyRequestContext(const ProxyRequestContext&) = delete;
   ProxyRequestContext(ProxyRequestContext&&) noexcept = delete;
   ProxyRequestContext& operator=(const ProxyRequestContext&) = delete;
@@ -205,6 +243,6 @@ class ProxyRequestContext {
   friend class ProxyBase;
 };
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

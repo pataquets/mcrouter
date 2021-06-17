@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -16,6 +14,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <unordered_map>
 
@@ -29,7 +28,13 @@
 // Forward declarations
 namespace folly {
 struct dynamic;
+class VirtualEventBase;
 } // namespace folly
+namespace hellogoodbye {
+namespace thrift {
+class HelloGoodbyeAsyncClient;
+} // namespace thrift
+} // namespace hellogoodbye
 
 namespace facebook {
 namespace memcache {
@@ -38,6 +43,7 @@ class RouteHandleFactory;
 namespace mcrouter {
 template <class RouterInfo>
 class ExtraRouteHandleProviderIf;
+class ProxyBase;
 } // namespace mcrouter
 } // namespace memcache
 } // namespace facebook
@@ -46,20 +52,22 @@ namespace hellogoodbye {
 
 namespace detail {
 
-using HelloGoodbyeRoutableRequests = carbon::List<GoodbyeRequest, HelloRequest>;
-
+using HelloGoodbyeRoutableRequests = carbon::List<
+    GoodbyeRequest,
+    HelloRequest>;
 } // namespace detail
 
 struct HelloGoodbyeRouterInfo {
   using RouteHandleIf = HelloGoodbyeRouteHandleIf;
   using RouteHandlePtr = std::shared_ptr<RouteHandleIf>;
+  using RouteHandleAsyncClient = thrift::HelloGoodbyeAsyncClient;
 
   static constexpr const char* name = "HelloGoodbye";
 
   template <class Route>
   using RouteHandle = HelloGoodbyeRouteHandle<Route>;
   using RoutableRequests = detail::HelloGoodbyeRoutableRequests;
-
+  
   using RouterStats = carbon::Stats<HelloGoodbyeRouterStatsConfig>;
 
   using RouteHandleFactoryMap = std::unordered_map<
@@ -69,11 +77,21 @@ struct HelloGoodbyeRouterInfo {
           const folly::dynamic&)>,
       folly::Hash>;
 
+  using RouteHandleFactoryMapWithProxy = std::unordered_map<
+      folly::StringPiece,
+      std::function<RouteHandlePtr(
+          facebook::memcache::RouteHandleFactory<RouteHandleIf>&,
+          const folly::dynamic&,
+          facebook::memcache::mcrouter::ProxyBase&)>,
+      folly::Hash>;
+
   static RouteHandleFactoryMap buildRouteMap();
+  static RouteHandleFactoryMapWithProxy buildRouteMapWithProxy();
 
   static std::unique_ptr<facebook::memcache::mcrouter::
                              ExtraRouteHandleProviderIf<HelloGoodbyeRouterInfo>>
   buildExtraProvider();
 };
-
 } // namespace hellogoodbye
+
+#include "mcrouter/lib/carbon/example/gen/HelloGoodbyeThriftTransport.h"

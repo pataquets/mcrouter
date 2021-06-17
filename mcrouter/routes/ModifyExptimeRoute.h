@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <cctype>
@@ -19,12 +17,13 @@
 #include <folly/Range.h>
 #include <folly/dynamic.h>
 
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/config/RouteHandleBuilder.h"
 #include "mcrouter/lib/config/RouteHandleFactory.h"
 #include "mcrouter/lib/fbi/cpp/util.h"
+#include "mcrouter/lib/network/MessageHelpers.h"
 
 namespace facebook {
 namespace memcache {
@@ -55,7 +54,7 @@ inline const char* actionToString(ModifyExptimeAction action) {
   return "";
 }
 
-} // detail
+} // namespace detail
 
 /**
  * Modifies exptime of a request.
@@ -66,59 +65,59 @@ inline const char* actionToString(ModifyExptimeAction action) {
  *
  * Note: 0 means infinite exptime.
  */
-template <class RouteHandleIf>
+template <class RouteHandleIf, ModifyExptimeAction Action>
 class ModifyExptimeRoute {
  public:
   std::string routeName() const {
     return folly::sformat(
         "modify-exptime|{}|exptime={}",
-        detail::actionToString(action_),
+        detail::actionToString(Action),
         exptime_);
   }
 
-  ModifyExptimeRoute(
-      std::shared_ptr<RouteHandleIf> target,
-      int32_t exptime,
-      ModifyExptimeAction action)
-      : target_(std::move(target)), exptime_(exptime), action_(action) {
-    assert(action_ != ModifyExptimeAction::Min || exptime_ != 0);
+  ModifyExptimeRoute(std::shared_ptr<RouteHandleIf> target, int32_t exptime)
+      : target_(std::move(target)), exptime_(exptime) {
+    assert(Action != ModifyExptimeAction::Min || exptime_ != 0);
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    t(*target_, req);
+    return t(*target_, req);
   }
 
   template <class Request>
   typename std::enable_if<
-      Request::hasExptime &&
-          carbon::OtherThan<Request, carbon::DeleteLike<>>::value,
+      HasExptimeTrait<Request>::value &&
+          carbon::OtherThan<Request, carbon::DeleteLike<>>::value &&
+          Action == ModifyExptimeAction::Set,
       ReplyT<Request>>::type
   route(const Request& req) const {
-    switch (action_) {
-      case ModifyExptimeAction::Set: {
-        auto mutReq = req;
-        mutReq.exptime() = exptime_;
-        return target_->route(mutReq);
-      }
-      case ModifyExptimeAction::Min: {
-        /* 0 means infinite exptime. Set minimum of request exptime, exptime. */
-        if (req.exptime() == 0 || req.exptime() > exptime_) {
-          auto mutReq = req;
-          mutReq.exptime() = exptime_;
-          return target_->route(mutReq);
-        }
-        return target_->route(req);
-      }
+    auto mutReq = req;
+    mutReq.exptime_ref() = exptime_;
+    return target_->route(mutReq);
+  }
+
+  template <class Request>
+  typename std::enable_if<
+      HasExptimeTrait<Request>::value &&
+          carbon::OtherThan<Request, carbon::DeleteLike<>>::value &&
+          Action == ModifyExptimeAction::Min,
+      ReplyT<Request>>::type
+  route(const Request& req) const {
+    /* 0 means infinite exptime. Set minimum of request exptime, exptime. */
+    if (*req.exptime_ref() == 0 || *req.exptime_ref() > exptime_) {
+      auto mutReq = req;
+      mutReq.exptime_ref() = exptime_;
+      return target_->route(mutReq);
     }
     return target_->route(req);
   }
 
   template <class Request>
   typename std::enable_if<
-      !Request::hasExptime || carbon::DeleteLike<Request>::value,
+      !HasExptimeTrait<Request>::value || carbon::DeleteLike<Request>::value,
       ReplyT<Request>>::type
   route(const Request& req) const {
     return target_->route(req);
@@ -127,8 +126,15 @@ class ModifyExptimeRoute {
  private:
   const std::shared_ptr<RouteHandleIf> target_;
   const int32_t exptime_;
-  const ModifyExptimeAction action_;
 };
+
+template <class RouteHandleIf>
+using ModifyExptimeRouteMin =
+    ModifyExptimeRoute<RouteHandleIf, ModifyExptimeAction::Min>;
+
+template <class RouteHandleIf>
+using ModifyExptimeRouteSet =
+    ModifyExptimeRoute<RouteHandleIf, ModifyExptimeAction::Set>;
 
 template <class RouterInfo>
 typename RouterInfo::RouteHandlePtr makeModifyExptimeRoute(
@@ -150,15 +156,24 @@ typename RouterInfo::RouteHandlePtr makeModifyExptimeRoute(
     action = detail::stringToAction(jaction->getString());
   }
 
-  // 0 means infinite exptime
-  if (action == ModifyExptimeAction::Min && exptime == 0) {
-    return target;
+  using RouteHandleIf = typename RouterInfo::RouteHandleIf;
+  if (action == ModifyExptimeAction::Min) {
+    // 0 means infinite exptime
+    if (exptime == 0) {
+      return target;
+    }
+
+    return makeRouteHandle<RouteHandleIf, ModifyExptimeRouteMin>(
+        std::move(target), exptime);
+  } else if (action == ModifyExptimeAction::Set) {
+    return makeRouteHandle<RouteHandleIf, ModifyExptimeRouteSet>(
+        std::move(target), exptime);
   }
 
-  return makeRouteHandle<
-      typename RouterInfo::RouteHandleIf,
-      ModifyExptimeRoute>(std::move(target), exptime, action);
+  // unknown action, ignore
+  assert(false);
+  return target;
 }
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

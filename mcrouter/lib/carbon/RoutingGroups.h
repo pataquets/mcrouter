@@ -1,15 +1,23 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
+#include <cstdlib>
+#include <type_traits>
+
+#include <folly/FixedString.h>
+
 namespace carbon {
+
+constexpr auto kArithmeticKey = folly::makeFixedString("arithmetic_like");
+constexpr auto kDeleteKey = folly::makeFixedString("delete_like");
+constexpr auto kGetKey = folly::makeFixedString("get_like");
+constexpr auto kUpdateKey = folly::makeFixedString("update_like");
 
 /**
  * Routing groups allow grouping requests with similar semantics. This way
@@ -132,4 +140,20 @@ struct OtherThan<Request, ArithmeticLike<>> {
 template <typename Request, typename... RequestTraitOrType>
 using OtherThanT = typename std::
     enable_if<OtherThan<Request, RequestTraitOrType...>::value, void*>::type;
-} // carbon
+
+template <class Request>
+const std::string getRoutingGroupName() {
+  if constexpr (ArithmeticLike<Request>::value) {
+    return kArithmeticKey;
+  } else if constexpr (DeleteLike<Request>::value) {
+    return kDeleteKey;
+  } else if constexpr (GetLike<Request>::value) {
+    return kGetKey;
+  } else if constexpr (UpdateLike<Request>::value) {
+    return kUpdateKey;
+  } else {
+    return "";
+  }
+}
+
+} // namespace carbon

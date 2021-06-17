@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -16,7 +14,7 @@
 
 #include <gtest/gtest.h>
 
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 #include "mcrouter/routes/ShardSplitRoute.h"
 #include "mcrouter/routes/test/RouteHandleTestUtil.h"
 
@@ -42,19 +40,19 @@ void testShardingForOp(ShardSplitter splitter, uint64_t requestFlags = 0) {
 
     std::vector<std::shared_ptr<ShardSplitTestHandle>> handles{
         std::make_shared<ShardSplitTestHandle>(
-            GetRouteTestData(mc_res_found, "a"),
-            UpdateRouteTestData(mc_res_found),
-            DeleteRouteTestData(mc_res_found))};
+            GetRouteTestData(carbon::Result::FOUND, "a"),
+            UpdateRouteTestData(carbon::Result::FOUND),
+            DeleteRouteTestData(carbon::Result::FOUND))};
     auto rh = get_route_handles(handles)[0];
     ShardSplitRouteHandle splitRoute(rh, splitter);
 
     TestFiberManager fm{FiberManagerContextTag()};
     fm.run([&] {
-      mockFiberContext();
+      mockFiberContext<RouterInfo>();
       Request req("test:123:");
-      req.flags() = requestFlags;
+      req.flags_ref() = requestFlags;
       auto reply = splitRoute.route(req);
-      EXPECT_EQ(mc_res_found, reply.result());
+      EXPECT_EQ(carbon::Result::FOUND, *reply.result_ref());
     });
 
     if (i == 0) {
@@ -70,7 +68,7 @@ void testShardingForOp(ShardSplitter splitter, uint64_t requestFlags = 0) {
   }
 }
 
-} // test
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace test
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

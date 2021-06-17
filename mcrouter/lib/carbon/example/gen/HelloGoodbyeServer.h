@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -33,7 +31,6 @@ using HelloGoodbyeRequestList = carbon::List<
     facebook::memcache::McShutdownRequest,
     facebook::memcache::McStatsRequest,
     facebook::memcache::McVersionRequest>;
-
 } // namespace detail
 
 template <class OnRequest>
@@ -45,9 +42,7 @@ class HelloGoodbyeRequestHandler
 
   template <class... Args>
   explicit HelloGoodbyeRequestHandler(Args&&... args)
-      : carbon::
-            CarbonRequestHandler<OnRequest, detail::HelloGoodbyeRequestList>(
-                std::forward<Args>(args)...) {}
+      : carbon::CarbonRequestHandler<OnRequest, detail::HelloGoodbyeRequestList>(
+            std::forward<Args>(args)...) {}
 };
-
 } // namespace hellogoodbye

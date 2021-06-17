@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
@@ -16,8 +14,6 @@
 #include "mcrouter/McrouterFiberContext.h"
 #include "mcrouter/ProxyBase.h"
 #include "mcrouter/ProxyRequestContext.h"
-#include "mcrouter/lib/McOperation.h"
-#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
@@ -84,11 +80,13 @@ class SlowWarmUpRoute {
         settings_(std::move(settings)) {}
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    t(*target_, req);
-    t(*failoverTarget_, req);
+    if (t(*target_, req)) {
+      return true;
+    }
+    return t(*failoverTarget_, req);
   }
 
   template <class Request>
@@ -115,12 +113,12 @@ class SlowWarmUpRoute {
   template <class Request>
   ReplyT<Request> routeImpl(const Request& req) const {
     auto reply = target_->route(req);
-    if (isHitResult(reply.result())) {
+    if (isHitResult(*reply.result_ref())) {
       ++stats_.hits;
-    } else if (isMissResult(reply.result())) {
+    } else if (isMissResult(*reply.result_ref())) {
       ++stats_.misses;
     }
-    return std::move(reply);
+    return reply;
   }
 
  private:
@@ -169,6 +167,6 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> makeSlowWarmUpRoute(
       std::move(target), std::move(failoverTarget), std::move(settings));
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

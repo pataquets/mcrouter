@@ -1,15 +1,16 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
-#include "mcrouter/lib/McOperation.h"
+
 #include "mcrouter/lib/network/McServerSession.h"
 #include "mcrouter/lib/network/WriteBuffer.h"
+
+#ifndef LIBMC_FBTRACE_DISABLE
+#include "mcrouter/facebook/ArtilleryTracing.h"
+#endif
 
 namespace facebook {
 namespace memcache {
@@ -17,8 +18,9 @@ namespace memcache {
 template <class Reply>
 void McServerRequestContext::reply(
     McServerRequestContext&& ctx,
-    Reply&& reply) {
-  replyImpl(std::move(ctx), std::move(reply));
+    Reply&& reply,
+    bool flush) {
+  replyImpl(std::move(ctx), std::move(reply), nullptr, nullptr, flush);
 }
 
 template <class Reply>
@@ -27,7 +29,12 @@ void McServerRequestContext::reply(
     Reply&& reply,
     DestructorFunc destructor,
     void* toDestruct) {
-  replyImpl(std::move(ctx), std::move(reply), destructor, toDestruct);
+  replyImpl(
+      std::move(ctx),
+      std::move(reply),
+      destructor,
+      toDestruct,
+      false /* flush */);
 }
 
 template <class Reply, class... Args>
@@ -39,9 +46,9 @@ McServerRequestContext::replyImpl(
     Args&&... args) {
   // On error, multi-get parent may assume responsiblity of replying
   if (ctx.moveReplyToParent(
-          reply.result(),
-          reply.appSpecificErrorCode(),
-          std::move(reply.message()))) {
+          *reply.result_ref(),
+          *reply.appSpecificErrorCode_ref(),
+          std::move(*reply.message_ref()))) {
     replyImpl2(std::move(ctx), Reply(), std::forward<Args>(args)...);
   } else {
     replyImpl2(std::move(ctx), std::move(reply), std::forward<Args>(args)...);
@@ -59,14 +66,26 @@ McServerRequestContext::replyImpl(
   replyImpl2(std::move(ctx), std::move(reply), std::forward<Args>(args)...);
 }
 
-template <class Reply>
+template <class Reply, class SessionType>
 void McServerRequestContext::replyImpl2(
     McServerRequestContext&& ctx,
     Reply&& reply,
     DestructorFunc destructor,
-    void* toDestruct) {
+    void* toDestruct,
+    bool flush) {
+#ifndef LIBMC_FBTRACE_DISABLE
+  if (UNLIKELY(ctx.isTraced_)) {
+    auto tracer = facebook::mcrouter::getCurrentTracer();
+    if (LIKELY(tracer != nullptr)) {
+      reply.setTraceContext(tracer->sendResponse());
+    }
+  }
+#endif
   ctx.replied_ = true;
-  auto session = ctx.session_;
+  // Note: 'SessionType' being a template parameter allows the use of
+  // McServerSession members, otherwise there's a circular dependency preventing
+  // concrete use of McServerSession here.
+  SessionType* const session = ctx.session_;
   if (toDestruct != nullptr) {
     assert(destructor != nullptr);
   }
@@ -79,20 +98,22 @@ void McServerRequestContext::replyImpl2(
     return;
   }
 
-  session->ensureWriteBufs();
-
   uint64_t reqid = ctx.reqid_;
-  auto wb = session->writeBufs_->get();
+  auto wb = session->writeBufs_.get(session->parser_.protocol());
   if (!wb->prepareTyped(
           std::move(ctx),
           std::move(reply),
           std::move(destructorContainer),
           session->compressionCodecMap_,
-          session->codecIdRange_)) {
+          session->codecIdRange_,
+          session->options_.tcpZeroCopyThresholdBytes)) {
     session->transport_->close();
     return;
   }
   session->reply(std::move(wb), reqid);
+  if (UNLIKELY(flush)) {
+    session->flushWrites();
+  }
 }
 
 /**
@@ -110,7 +131,7 @@ bool McServerRequestContext::noReply(const Reply& r) const {
   if (!hasParent()) {
     return false;
   }
-  return isParentError() || r.result() != mc_res_found;
+  return isParentError() || *r.result_ref() != carbon::Result::FOUND;
 }
 
 inline bool McServerRequestContext::noReply(const McLeaseGetReply&) const {
@@ -133,7 +154,7 @@ struct HasDispatchTypedRequest<
     T,
     typename std::enable_if<std::is_same<
         decltype(std::declval<T>().dispatchTypedRequest(
-            std::declval<UmbrellaMessageInfo>(),
+            std::declval<CaretMessageInfo>(),
             std::declval<folly::IOBuf>(),
             std::declval<McServerRequestContext>())),
         bool>::value>::type> {
@@ -142,7 +163,7 @@ struct HasDispatchTypedRequest<
 
 template <class OnRequest>
 void McServerOnRequestWrapper<OnRequest, List<>>::caretRequestReady(
-    const UmbrellaMessageInfo& headerInfo,
+    const CaretMessageInfo& headerInfo,
     const folly::IOBuf& reqBuf,
     McServerRequestContext&& ctx) {
   dispatchTypedRequestIfDefined(
@@ -152,5 +173,5 @@ void McServerOnRequestWrapper<OnRequest, List<>>::caretRequestReady(
       HasDispatchTypedRequest<OnRequest>::value);
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

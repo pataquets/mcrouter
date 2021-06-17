@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include "mcrouter/lib/network/AsciiSerialized.h"
@@ -21,16 +19,12 @@ class ConnectionFifo;
 template <class Callback>
 class ServerMcParser : private McParser::ParserCallback {
  public:
-  ServerMcParser(
-      Callback& cb,
-      size_t minBufferSize,
-      size_t maxBufferSize,
-      ConnectionFifo* debugFifo = nullptr);
+  ServerMcParser(Callback& cb, size_t minBufferSize, size_t maxBufferSize);
 
   ~ServerMcParser() override;
 
   /**
-   * TAsyncTransport-style getReadBuffer().
+   * AsyncTransport-style getReadBuffer().
    *
    * @return  a buffer pointer and its size that should be safe to read into.
    *
@@ -61,6 +55,11 @@ class ServerMcParser : private McParser::ParserCallback {
     return asciiParser_.getErrorDescription();
   }
 
+  void setDebugFifo(ConnectionFifo* fifo) {
+    debugFifo_ = fifo;
+    parser_.setDebugFifo(fifo);
+  }
+
  private:
   McParser parser_;
   McServerAsciiParser asciiParser_;
@@ -72,18 +71,12 @@ class ServerMcParser : private McParser::ParserCallback {
   template <class Request>
   FOLLY_NOINLINE void writeToPipe(const Request& req);
 
-  template <class Request>
-  void requestReadyHelper(Request&& req, uint64_t reqid);
-
   /* McParser callbacks */
-  bool umMessageReady(
-      const UmbrellaMessageInfo& info,
-      const folly::IOBuf& buffer) final;
   bool caretMessageReady(
-      const UmbrellaMessageInfo& headerInfo,
+      const CaretMessageInfo& headerInfo,
       const folly::IOBuf& buffer) final;
   void handleAscii(folly::IOBuf& readBuffer) final;
-  void parseError(mc_res_t result, folly::StringPiece reason) final;
+  void parseError(carbon::Result result, folly::StringPiece reason) final;
   bool shouldReadToAsciiBuffer() const;
 
   // McServerAsciiParser callbacks
@@ -95,7 +88,7 @@ class ServerMcParser : private McParser::ParserCallback {
   template <class C, class ReqsList>
   friend class detail::CallbackWrapper;
 };
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook
 
 #include "ServerMcParser-inl.h"

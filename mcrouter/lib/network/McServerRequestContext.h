@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <string>
@@ -14,12 +12,15 @@
 
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
+#include <folly/io/async/AsyncTransport.h>
+#include <folly/io/async/EventBase.h>
 
+#include <thrift/lib/cpp2/server/Cpp2ConnContext.h>
+#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/carbon/RequestReplyUtil.h"
 #include "mcrouter/lib/carbon/RoutingGroups.h"
 #include "mcrouter/lib/network/CarbonMessageList.h"
 #include "mcrouter/lib/network/ServerLoad.h"
-#include "mcrouter/lib/network/UmbrellaProtocol.h"
 
 namespace facebook {
 namespace memcache {
@@ -40,7 +41,8 @@ class McServerRequestContext {
   using DestructorFunc = void (*)(void*);
 
   template <class Reply>
-  static void reply(McServerRequestContext&& ctx, Reply&& reply);
+  static void
+  reply(McServerRequestContext&& ctx, Reply&& reply, bool flush = false);
 
   template <class Reply>
   static void reply(
@@ -59,9 +61,20 @@ class McServerRequestContext {
    */
   McServerSession& session();
 
-  double getDropProbability() const;
-
   ServerLoad getServerLoad() const noexcept;
+
+  folly::Optional<struct sockaddr_storage> getPeerSocketAddress();
+  folly::Optional<std::string> getPeerSocketAddressStr();
+
+  folly::EventBase& getSessionEventBase() const noexcept;
+  const apache::thrift::Cpp2RequestContext* getThriftRequestContext()
+      const noexcept;
+
+  const folly::AsyncTransportWrapper* getTransport() const noexcept;
+
+  void markAsTraced();
+
+  void* getConnectionUserData();
 
  private:
   McServerSession* session_;
@@ -70,6 +83,7 @@ class McServerRequestContext {
   bool isEndContext_{false}; // Used to mark end of ASCII multi-get request
   bool noReply_;
   bool replied_{false};
+  bool isTraced_{false};
 
   uint64_t reqid_;
   struct AsciiState {
@@ -93,12 +107,13 @@ class McServerRequestContext {
       carbon::GetLike<>>::value>::type
   replyImpl(McServerRequestContext&& ctx, Reply&& reply, Args&&... args);
 
-  template <class Reply>
+  template <class Reply, class SessionType = McServerSession>
   static void replyImpl2(
       McServerRequestContext&& ctx,
       Reply&& reply,
       DestructorFunc destructor = nullptr,
-      void* toDestruct = nullptr);
+      void* toDestruct = nullptr,
+      bool flush = false);
 
   folly::Optional<folly::IOBuf>& asciiKey() {
     if (!asciiState_) {
@@ -128,7 +143,7 @@ class McServerRequestContext {
    * moved to parent.
    */
   bool moveReplyToParent(
-      mc_res_t result,
+      carbon::Result result,
       uint32_t errorCode,
       std::string&& errorMessage) const;
 
@@ -148,8 +163,16 @@ class McServerRequestContext {
       bool isEndContext = false);
 };
 
+void markContextAsTraced(McServerRequestContext& ctx);
+
 static_assert(
+#if defined(__i386__)
+    sizeof(McServerRequestContext) == 20,
+#elif defined(__ARM_ARCH) && !defined(__aarch64__)
+    sizeof(McServerRequestContext) == 24,
+#else
     sizeof(McServerRequestContext) == 32,
+#endif
     "Think twice before adding more fields to McServerRequestContext,"
     " doing so WILL have perf implications");
 
@@ -172,7 +195,7 @@ template <class Request>
 class McServerOnRequestIf<List<Request>> {
  public:
   virtual void caretRequestReady(
-      const UmbrellaMessageInfo& headerInfo,
+      const CaretMessageInfo& headerInfo,
       const folly::IOBuf& reqBody,
       McServerRequestContext&& ctx) = 0;
 
@@ -233,12 +256,12 @@ class McServerOnRequestWrapper<OnRequest, List<>> : public McServerOnRequest {
         onRequest_(std::forward<Args>(args)...) {}
 
   void caretRequestReady(
-      const UmbrellaMessageInfo& headerInfo,
+      const CaretMessageInfo& headerInfo,
       const folly::IOBuf& reqBody,
       McServerRequestContext&& ctx) final;
 
   void dispatchTypedRequestIfDefined(
-      const UmbrellaMessageInfo& headerInfo,
+      const CaretMessageInfo& headerInfo,
       const folly::IOBuf& reqBody,
       McServerRequestContext&& ctx,
       std::true_type) {
@@ -248,7 +271,7 @@ class McServerOnRequestWrapper<OnRequest, List<>> : public McServerOnRequest {
   }
 
   void dispatchTypedRequestIfDefined(
-      const UmbrellaMessageInfo&,
+      const CaretMessageInfo&,
       const folly::IOBuf& /* reqBody */,
       McServerRequestContext&&,
       std::false_type) {
@@ -267,7 +290,7 @@ class McServerOnRequestWrapper<OnRequest, List<>> : public McServerOnRequest {
   void
   requestReadyImpl(McServerRequestContext&& ctx, Request&&, std::false_type) {
     McServerRequestContext::reply(
-        std::move(ctx), ReplyT<Request>(mc_res_local_error));
+        std::move(ctx), ReplyT<Request>(carbon::Result::LOCAL_ERROR));
   }
 
  protected:
@@ -293,7 +316,7 @@ class McServerOnRequestWrapper<OnRequest, List<Request, Requests...>>
   }
 };
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook
 
 #include "McServerRequestContext-inl.h"

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <mutex>
 
 #include "mcrouter/lib/fbi/cpp/LogFailure.h"
@@ -27,7 +25,7 @@ typename Observable<Data>::CallbackHandle Observable<Data>::subscribe(
 template <class Data>
 typename Observable<Data>::CallbackHandle Observable<Data>::subscribeAndCall(
     OnUpdateOldNew callback) {
-  std::lock_guard<SFRReadLock> lck(dataLock_.readLock());
+  folly::SharedMutex::ReadHolder lck(dataLock_);
   try {
     callback(Data(), data_);
   } catch (const std::exception& e) {
@@ -47,13 +45,13 @@ typename Observable<Data>::CallbackHandle Observable<Data>::subscribeAndCall(
 
 template <class Data>
 Data Observable<Data>::get() {
-  std::lock_guard<SFRReadLock> lck(dataLock_.readLock());
+  folly::SharedMutex::ReadHolder lck(dataLock_);
   return data_;
 }
 
 template <class Data>
 void Observable<Data>::set(Data data) {
-  std::lock_guard<SFRWriteLock> lck(dataLock_.writeLock());
+  folly::SharedMutex::WriteHolder lck(dataLock_);
   auto old = std::move(data_);
   data_ = std::move(data);
   // no copy here, because old and data are passed by const reference
@@ -65,6 +63,6 @@ template <typename... Args>
 void Observable<Data>::emplace(Args&&... args) {
   set(Data(std::forward<Args>(args)...));
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <exception>
@@ -15,11 +13,11 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/carbon/Variant.h"
 #include "mcrouter/lib/fbi/cpp/TypeList.h"
 #include "mcrouter/lib/network/CarbonMessageList.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 namespace facebook {
 namespace memcache {
@@ -83,6 +81,9 @@ class McAsciiParserBase {
       folly::IOBuf& buffer,
       const char* posStart,
       const char* posEnd);
+
+  // limit the value size.
+  static constexpr uint32_t maxValueBytes = 1 * 1024 * 1024 * 1024; // 1GB
 
   std::string currentErrorDescription_;
 
@@ -179,7 +180,7 @@ class McClientAsciiParser : public McAsciiParserBase {
 namespace detail {
 template <class RequestList>
 class CallbackBase;
-} // detail
+} // namespace detail
 
 class McServerAsciiParser : public McAsciiParserBase {
  public:
@@ -204,6 +205,10 @@ class McServerAsciiParser : public McAsciiParserBase {
   void initGetLike();
   template <class Request>
   void consumeGetLike(folly::IOBuf& buffer);
+  template <class Request>
+  void initGatLike();
+  template <class Request>
+  void consumeGatLike(folly::IOBuf& buffer);
 
   // Update-like.
   template <class Request>
@@ -245,7 +250,7 @@ class McServerAsciiParser : public McAsciiParserBase {
   using ConsumerFunPtr = void (McServerAsciiParser::*)(folly::IOBuf&);
   ConsumerFunPtr consumer_{nullptr};
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook
 
 #include "McAsciiParser-inl.h"

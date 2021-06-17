@@ -1,19 +1,15 @@
-# Copyright (c) 2015-present, Facebook, Inc.
-# All rights reserved.
+#!/usr/bin/env python3
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import time
 
 from mcrouter.test.MCProcess import Memcached
 from mcrouter.test.McrouterTestCase import McrouterTestCase
+
 
 class TestShadowRoute(McrouterTestCase):
     config = './mcrouter/test/test_shadow_route.json'
@@ -34,7 +30,11 @@ class TestShadowRoute(McrouterTestCase):
         for key, value in kv:
             self.mcrouter.set(key, value)
 
-        time.sleep(1)
+        retries = 0
+        key, val = kv[0]
+        while self.mcrouter.get(key) != val and retries < 5:
+            time.sleep(1)
+            retries += 1
 
         for key, value in kv:
             self.assertEqual(self.mc_foo_0.get(key), value)

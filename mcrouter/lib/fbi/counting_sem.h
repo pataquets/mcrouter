@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 /**
@@ -40,18 +38,15 @@
  * in the uncontented case.
  */
 #include <stdint.h>
+#include <atomic>
 
-#include "mcrouter/lib/fbi/decls.h"
-
-__BEGIN_DECLS
-
-typedef struct counting_sem_s {
+struct counting_sem_t {
   /**
    * Semaphore value.
    * -1 means "the value is 0 and there's a thread waiting".
    */
-  int32_t cnt;
-} counting_sem_t;
+  std::atomic<int32_t> cnt{};
+};
 
 /**
  * Initialize the semaphore.
@@ -83,5 +78,3 @@ int32_t counting_sem_lazy_nonblocking(counting_sem_t* sem, int32_t n);
  * Does nothing if n <= 0.
  */
 void counting_sem_post(counting_sem_t* sem, int32_t n);
-
-__END_DECLS

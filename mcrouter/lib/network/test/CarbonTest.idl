@@ -1,3 +1,8 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 namespace facebook::memcache::test;
 
 struct ManyFields {
@@ -41,4 +46,10 @@ struct ManyFields {
   38: folly::IOBuf buf38;
   39: folly::IOBuf buf39;
   40: folly::IOBuf buf40;
+};
+
+struct McExpTestRequest {
+  1: carbon::Keys<folly::IOBuf> key;
+  2: uint64_t flags;
+  3: uint64_t deadlineMs;
 };

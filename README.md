@@ -1,7 +1,8 @@
-# Mcrouter [![Build Status](https://travis-ci.org/facebook/mcrouter.svg?branch=master)](https://travis-ci.org/facebook/mcrouter)
+# Mcrouter [![Build Status](https://github.com/facebook/mcrouter/workflows/build/badge.svg)](https://github.com/facebook/mcrouter/actions?workflow=build)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/facebook/mcrouter/blob/master/LICENSE)
 
-Mcrouter is a memcached protocol router for scaling memcached
-(http://memcached.org/) deployments. It's a core component of cache
+Mcrouter (pronounced mc router) is a memcached protocol router for scaling [memcached](http://memcached.org/)
+deployments. It's a core component of cache
 infrastructure at Facebook and Instagram where mcrouter handles almost
 5 billion requests per second at peak.
 
@@ -11,10 +12,34 @@ See https://github.com/facebook/mcrouter/wiki to get started.
 
 ## Quick start guide
 
+### New! Ubuntu package available
+
+Currently, we support Ubuntu Bionic (18.04) amd64.
+Here is how to install it:
+
+Add the repo key:
+
+    $ wget -O - https://facebook.github.io/mcrouter/debrepo/bionic/PUBLIC.KEY | sudo apt-key add
+
+Add the following line to apt sources file /etc/apt/sources.list
+
+    deb https://facebook.github.io/mcrouter/debrepo/bionic bionic contrib
+
+Update the local repo cache:
+
+    $ sudo apt-get update
+
+Install mcrouter:
+
+    $ sudo apt-get install mcrouter
+
+
+### Installing From Source
+
 See https://github.com/facebook/mcrouter/wiki/mcrouter-installation for more
 detailed installation instructions.
 
-Mcrouter depends on folly (https://github.com/facebook/folly).
+Mcrouter depends on [folly](https://github.com/facebook/folly), [wangle](https://github.com/facebook/wangle), [fizz](https://github.com/facebookincubator/fizz), and [fbthrift](https://github.com/facebook/fbthrift).
 
 The installation is a standard autotools flow:
 
@@ -64,8 +89,7 @@ Engineering discussions and support: https://www.facebook.com/groups/mcrouter
 
 ## License
 
-Copyright (c) 2016, Facebook, Inc.
-All rights reserved.
+Copyright (c) Facebook, Inc. and its affiliates.
 
-Licensed under a BSD license:
+Licensed under the MIT license:
 https://github.com/facebook/mcrouter/blob/master/LICENSE

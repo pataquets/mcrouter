@@ -1,110 +1,95 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
+#include <optional>
 #include <utility>
 
-#include "mcrouter/lib/Ref.h"
+#include <folly/io/IOBuf.h>
 
-#ifndef LIBMC_FBTRACE_DISABLE
-#include "mcrouter/lib/mc/mc_fbtrace_info.h"
-#endif
+#include "mcrouter/lib/carbon/MessageCommon.h"
 
 namespace carbon {
 
-class RequestCommon {
+class RequestCommon : public MessageCommon {
  public:
 #ifndef LIBMC_FBTRACE_DISABLE
   RequestCommon() = default;
 
   RequestCommon(const RequestCommon& other) {
-    if (other.fbtraceInfo()) {
-      fbtraceInfo_ =
-          McFbtraceRef::moveRef(mc_fbtrace_info_deep_copy(other.fbtraceInfo()));
-    }
+    traceContext_ = other.traceContext_;
   }
-  RequestCommon& operator=(const RequestCommon&) = delete;
+  RequestCommon& operator=(const RequestCommon& other) {
+    if (this != &other) {
+      traceContext_ = other.traceContext_;
+    }
+    return *this;
+  }
 
   RequestCommon(RequestCommon&&) = default;
   RequestCommon& operator=(RequestCommon&&) = default;
 #endif
 
-  std::pair<uint64_t, uint64_t> traceToInts() const {
-    // Trace metadata consists of trace ID and node ID
-    std::pair<uint64_t, uint64_t> traceMetadata{0, 0};
-#ifndef LIBMC_FBTRACE_DISABLE
-    if (!fbtraceInfo_.get() ||
-        fbtrace_decode(fbtraceInfo_->metadata, &traceMetadata.first) != 0 ||
-        fbtrace_decode(
-            fbtraceInfo_->metadata + kTraceIdSize, &traceMetadata.second) !=
-            0) {
-      return {0, 0};
-    }
-#endif
-    return traceMetadata;
-  }
-
-  void setTraceId(std::pair<uint64_t, uint64_t> traceId) {
-#ifndef LIBMC_FBTRACE_DISABLE
-    if (traceId.first == 0 || traceId.second == 0) {
-      return;
-    }
-
-    auto traceInfo = McFbtraceRef::moveRef(new_mc_fbtrace_info(0));
-    if (!traceInfo.get() ||
-        fbtrace_encode(traceId.first, traceInfo->metadata) != 0 ||
-        fbtrace_encode(traceId.second, traceInfo->metadata + kTraceIdSize) !=
-            0) {
-      return;
-    }
-    fbtraceInfo_ = std::move(traceInfo);
-#endif
-  }
-
-#ifndef LIBMC_FBTRACE_DISABLE
-  mc_fbtrace_info_s* fbtraceInfo() const {
-    return fbtraceInfo_.get();
+  /**
+   * Tells whether or not "serializedBuffer()" is dirty, in which case it can't
+   * be used.
+   */
+  bool isBufferDirty() const {
+    return serializedBuffer_ == nullptr;
   }
 
   /**
-   * Note: will not incref info, it's up to the caller.
+   * Sets a buffer that can be used to avoid reserializing the request.
+   * If the request is modified *after* this method is called, the buffer will
+   * be marked as dirty and will not be used (i.e. the request will be
+   * re-serialized).
+   *
+   * NOTE: The caller is responsible for keeping the buffer alive until the
+   * reply is received.
    */
-  void setFbtraceInfo(mc_fbtrace_info_s* carbonFbtraceInfo) {
-    fbtraceInfo_ = McFbtraceRef::moveRef(carbonFbtraceInfo);
+  void setSerializedBuffer(const folly::IOBuf& buffer) {
+    if (buffer.empty()) {
+      serializedBuffer_ = nullptr;
+    } else {
+      serializedBuffer_ = &buffer;
+    }
   }
-#endif
+
+  /**
+   * Gets the buffer with this request serialized.
+   * Will return nullptr if the buffer is dirty and can't be used.
+   */
+  const folly::IOBuf* serializedBuffer() const {
+    return serializedBuffer_;
+  }
+
+  // Store CAT token in an optional field.
+  void setCryptoAuthToken(std::string&& token) {
+    cryptoAuthToken_.emplace(std::move(token));
+  }
+
+  /**
+   * get the optional field that may store a CAT token
+   * Used by mcrouter transport layer to pass the value to thrift header
+   */
+  const std::optional<std::string>& getCryptoAuthToken() const {
+    return cryptoAuthToken_;
+  }
+
+ protected:
+  void markBufferAsDirty() {
+    serializedBuffer_ = nullptr;
+  }
 
  private:
-  static constexpr size_t kTraceIdSize = 11;
-
-#ifndef LIBMC_FBTRACE_DISABLE
-  struct McFbtraceRefPolicy {
-    struct Deleter {
-      void operator()(mc_fbtrace_info_t* info) const {
-        mc_fbtrace_info_decref(info);
-      }
-    };
-
-    static mc_fbtrace_info_t* increfOrNull(mc_fbtrace_info_t* info) {
-      return mc_fbtrace_info_incref(info);
-    }
-
-    static void decref(mc_fbtrace_info_t* info) {
-      mc_fbtrace_info_decref(info);
-    }
-  };
-
-  using McFbtraceRef =
-      facebook::memcache::Ref<mc_fbtrace_info_t, McFbtraceRefPolicy>;
-  McFbtraceRef fbtraceInfo_;
-#endif
+  const folly::IOBuf* serializedBuffer_{nullptr};
+  // cat token(s) in string serialzed format
+  std::optional<std::string> cryptoAuthToken_;
 };
 
-} // carbon
+} // namespace carbon

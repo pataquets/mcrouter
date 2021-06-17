@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -30,12 +28,15 @@
 #include <mcrouter/routes/AllInitialRouteFactory.h>
 #include <mcrouter/routes/AllMajorityRouteFactory.h>
 #include <mcrouter/routes/AllSyncRouteFactory.h>
+#include <mcrouter/routes/BlackholeRoute.h>
 #include <mcrouter/routes/DevNullRoute.h>
 #include <mcrouter/routes/ErrorRoute.h>
 #include <mcrouter/routes/FailoverRoute.h>
 #include <mcrouter/routes/HashRouteFactory.h>
 #include <mcrouter/routes/HostIdRouteFactory.h>
+#include <mcrouter/routes/LatencyInjectionRoute.h>
 #include <mcrouter/routes/LatestRoute.h>
+#include <mcrouter/routes/LoadBalancerRoute.h>
 #include <mcrouter/routes/LoggingRoute.h>
 #include <mcrouter/routes/MigrateRouteFactory.h>
 #include <mcrouter/routes/MissFailoverRoute.h>
@@ -52,6 +53,8 @@ using namespace facebook::memcache::mcrouter;
 namespace facebook {
 namespace memcache {
 
+constexpr const char* MemcacheRouterInfo::name;
+
 /* static */ MemcacheRouterInfo::RouteHandleFactoryMap
 MemcacheRouterInfo::buildRouteMap() {
   RouteHandleFactoryMap map{
@@ -60,6 +63,7 @@ MemcacheRouterInfo::buildRouteMap() {
       {"AllInitialRoute", &makeAllInitialRoute<MemcacheRouterInfo>},
       {"AllMajorityRoute", &makeAllMajorityRoute<MemcacheRouterInfo>},
       {"AllSyncRoute", &makeAllSyncRoute<MemcacheRouterInfo>},
+      {"BlackholeRoute", &makeBlackholeRoute<MemcacheRouterInfo>},
       {"DevNullRoute", &makeDevNullRoute<MemcacheRouterInfo>},
       {"ErrorRoute", &makeErrorRoute<MemcacheRouterInfo>},
       {"HashRoute",
@@ -68,7 +72,10 @@ MemcacheRouterInfo::buildRouteMap() {
          return makeHashRoute<MemcacheRouterInfo>(factory, json);
        }},
       {"HostIdRoute", &makeHostIdRoute<MemcacheRouterInfo>},
+      {"LatencyInjectionRoute",
+       &makeLatencyInjectionRoute<MemcacheRouterInfo>},
       {"LatestRoute", &makeLatestRoute<MemcacheRouterInfo>},
+      {"LoadBalancerRoute", &makeLoadBalancerRoute<MemcacheRouterInfo>},
       {"LoggingRoute", &makeLoggingRoute<MemcacheRouterInfo>},
       {"MigrateRoute", &makeMigrateRoute<MemcacheRouterInfo>},
       {"MissFailoverRoute", &makeMissFailoverRoute<MemcacheRouterInfo>},
@@ -81,11 +88,15 @@ MemcacheRouterInfo::buildRouteMap() {
   return map;
 }
 
+/* static */ MemcacheRouterInfo::RouteHandleFactoryMapWithProxy
+MemcacheRouterInfo::buildRouteMapWithProxy() {
+  return RouteHandleFactoryMapWithProxy();
+}
+
 /* static */
 std::unique_ptr<ExtraRouteHandleProviderIf<MemcacheRouterInfo>>
 MemcacheRouterInfo::buildExtraProvider() {
   return std::make_unique<McExtraRouteHandleProvider<MemcacheRouterInfo>>();
 }
-
 } // namespace memcache
 } // namespace facebook

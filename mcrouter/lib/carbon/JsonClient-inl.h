@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <chrono>
@@ -15,7 +13,7 @@
 #include <folly/io/async/EventBase.h>
 #include <folly/json.h>
 
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/carbon/CarbonMessageConversionUtils.h"
 #include "mcrouter/lib/network/AsyncMcClient.h"
 
@@ -27,7 +25,7 @@ bool JsonClient::sendRequest(
     folly::dynamic& replyJson) {
   bool hasErrors = false;
   auto onParsingError = [this, &hasErrors](
-      folly::StringPiece field, folly::StringPiece msg) {
+                            folly::StringPiece field, folly::StringPiece msg) {
     hasErrors = true;
     onError(folly::to<std::string>(field, ": ", msg));
   };
@@ -42,7 +40,7 @@ bool JsonClient::sendRequest(
   facebook::memcache::ReplyT<Request> reply;
   bool replyReceived = false;
   fiberManager_.addTask(
-      [ this, request = std::move(request), &replyReceived, &reply ]() {
+      [this, request = std::move(request), &replyReceived, &reply]() {
         reply = client_.sendSync(
             std::move(request),
             std::chrono::milliseconds(options().serverTimeoutMs));
@@ -57,4 +55,4 @@ bool JsonClient::sendRequest(
   return true;
 }
 
-} // carbon
+} // namespace carbon

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <atomic>
@@ -22,9 +20,12 @@
 #include <folly/synchronization/CallOnce.h>
 
 #include "mcrouter/ConfigApi.h"
+#include "mcrouter/ExternalStatsHandler.h"
 #include "mcrouter/LeaseTokenMap.h"
 #include "mcrouter/Observable.h"
+#include "mcrouter/PoolStats.h"
 #include "mcrouter/TkoTracker.h"
+#include "mcrouter/lib/network/Transport.h"
 #include "mcrouter/options.h"
 
 namespace facebook {
@@ -49,8 +50,16 @@ using ShadowLeaseTokenMap = folly::Synchronized<
     folly::EvictingCacheMap<int64_t, int64_t>,
     folly::fibers::TimedMutex>;
 
+using LogPostprocessCallbackFunc = std::function<void(
+    const folly::dynamic&, // Serialized request
+    const folly::dynamic&, // Serialized reply
+    const char* const, // Name of operation (e.g. 'get')
+    const folly::StringPiece)>; // User ip
+
 class CarbonRouterInstanceBase {
  public:
+  using SvcIdentAuthCallbackFunc = Transport::SvcIdentAuthCallbackFunc;
+
   explicit CarbonRouterInstanceBase(McrouterOptions inputOptions);
   virtual ~CarbonRouterInstanceBase() = default;
 
@@ -75,6 +84,10 @@ class CarbonRouterInstanceBase {
 
   TkoTrackerMap& tkoTrackerMap() {
     return tkoTrackerMap_;
+  }
+
+  ExternalStatsHandler& externalStatsHandler() {
+    return externalStatsHandler_;
   }
 
   ConfigApi& configApi() {
@@ -117,6 +130,14 @@ class CarbonRouterInstanceBase {
     postprocessCallback_ = std::move(newCallback);
   }
 
+  const SvcIdentAuthCallbackFunc& svcIdentAuthCallbackFunc() const {
+    return svcIdentAuthCallback_;
+  }
+
+  void setSvcIdentAuthCallbackFunc(SvcIdentAuthCallbackFunc&& newCallback) {
+    svcIdentAuthCallback_ = std::move(newCallback);
+  }
+
   /**
    * Returns an AsyncWriter for mission critical work (use statsLogWriter() for
    * auxiliary / low priority work).
@@ -124,27 +145,56 @@ class CarbonRouterInstanceBase {
   folly::ReadMostlySharedPtr<AsyncWriter> asyncWriter();
 
   std::unordered_map<std::string, std::string> getStartupOpts() const;
-  void addStartupOpts(
+  void setStartupOpts(
       std::unordered_map<std::string, std::string> additionalOpts);
 
   uint64_t startTime() const {
-    return startTime_;
+    return startTime_.load(std::memory_order_relaxed);
   }
 
   time_t lastConfigAttempt() const {
-    return lastConfigAttempt_;
+    return lastConfigAttempt_.load(std::memory_order_relaxed);
   }
 
   size_t configFailures() const {
-    return configFailures_;
+    return configFailures_.load(std::memory_order_relaxed);
   }
 
   bool configuredFromDisk() const {
-    return configuredFromDisk_;
+    return configuredFromDisk_.load(std::memory_order_relaxed);
+  }
+
+  size_t partialReconfigAttempt() const {
+    return partialReconfigAttempt_.load(std::memory_order_relaxed);
+  }
+
+  size_t partialReconfigSuccess() const {
+    return partialReconfigSuccess_.load(std::memory_order_relaxed);
+  }
+
+  size_t configFullAttempt() const {
+    return configFullAttempt_.load(std::memory_order_relaxed);
   }
 
   bool isRxmitReconnectionDisabled() const {
     return disableRxmitReconnection_;
+  }
+
+  /**
+   * This function finds the index of poolName in the statsEnabledPools_
+   * sorted array by doing binary search. If exact match is not found,
+   * index with maximum prefix match is returned.
+   *
+   * @return index of the pool in the statsEnabledPools_ vector
+   *         -1 if not found
+   */
+  int32_t getStatsEnabledPoolIndex(folly::StringPiece poolName) const;
+
+  /**
+   * @return  reference to the statsEnabledPools_ vector
+   */
+  const std::vector<std::string>& getStatsEnabledPools() const {
+    return statsEnabledPools_;
   }
 
   /**
@@ -164,7 +214,25 @@ class CarbonRouterInstanceBase {
    */
   std::shared_ptr<folly::FunctionScheduler> functionScheduler();
 
+  /**
+   * Returns name of router e.g. Memcache"
+   */
+  virtual folly::StringPiece routerInfoName() const = 0;
+
+  template <class T>
+  auto getMetadata() {
+    return std::static_pointer_cast<T>(metadata_);
+  }
+
+  void setMetadata(std::shared_ptr<void> metadata) {
+    metadata_ = std::move(metadata);
+  }
+
  protected:
+  void resetMetadata() {
+    metadata_.reset();
+  }
+
   /**
    * Register this instance for periodic stats updates.
    */
@@ -180,12 +248,16 @@ class CarbonRouterInstanceBase {
   const std::unique_ptr<ConfigApi> configApi_;
 
   LogPostprocessCallbackFunc postprocessCallback_;
+  SvcIdentAuthCallbackFunc svcIdentAuthCallback_;
 
   // These next four fields are used for stats
-  uint64_t startTime_{0};
-  time_t lastConfigAttempt_{0};
-  size_t configFailures_{0};
-  bool configuredFromDisk_{false};
+  std::atomic<uint64_t> startTime_{0};
+  std::atomic<time_t> lastConfigAttempt_{0};
+  std::atomic<size_t> configFailures_{0};
+  std::atomic<bool> configuredFromDisk_{false};
+  std::atomic<size_t> partialReconfigAttempt_{0};
+  std::atomic<size_t> partialReconfigSuccess_{0};
+  std::atomic<size_t> configFullAttempt_{0};
 
   // Stores whether we should reconnect after hitting rxmit threshold
   std::atomic<bool> disableRxmitReconnection_{false};
@@ -202,6 +274,7 @@ class CarbonRouterInstanceBase {
   }
 
   TkoTrackerMap tkoTrackerMap_;
+  ExternalStatsHandler externalStatsHandler_;
   std::unique_ptr<const CompressionCodecManager> compressionCodecManager_;
 
   // Stores data for runtime variables.
@@ -216,6 +289,7 @@ class CarbonRouterInstanceBase {
   folly::once_flag shadowLeaseTokenMapInitFlag_;
 
   std::unordered_map<std::string, std::string> additionalStartupOpts_;
+  std::atomic<bool> startupOptsInitialized_{false};
 
   std::mutex nextProxyMutex_;
   size_t nextProxy_{0};
@@ -226,9 +300,17 @@ class CarbonRouterInstanceBase {
   // Name of the stats update function registered with the function scheduler.
   const std::string statsUpdateFunctionHandle_;
 
+  std::vector<std::string> statsEnabledPools_;
+
   // Aggregates stats for all associated proxies. Should be called periodically.
   void updateStats();
+
+  /**
+   * Opaque metadata used by SRRoute, to avoid circular dependency
+   */
+  std::shared_ptr<void> metadata_;
 };
-}
-}
-} // facebook::memcache::mcrouter
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

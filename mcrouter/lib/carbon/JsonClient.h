@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/dynamic.h>
@@ -46,6 +44,23 @@ class JsonClient {
      * Whether of not parsing errors should be ignored (they will be displayed).
      */
     bool ignoreParsingErrors{true};
+
+    /**
+     * Whether or not to use SSL.
+     */
+    bool useSsl;
+
+    /**
+     * The SSL cert/key/CA paths.
+     */
+    std::string pemCertPath;
+    std::string pemKeyPath;
+    std::string pemCaPath;
+
+    /**
+     * The SSL service identity.
+     */
+    std::string sslServiceIdentity;
   };
 
   /**
@@ -124,6 +139,6 @@ class JsonClient {
   void onError(const std::string& msg) const;
 };
 
-} // carbon
+} // namespace carbon
 
 #include "JsonClient-inl.h"

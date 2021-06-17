@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <string>
 #include <unordered_map>
 
@@ -32,7 +30,8 @@ TEST(Flavor, readStandaloneFlavor) {
   std::string flavorContents =
       "{"
       "\"libmcrouter_options\": {"
-      "\"default_route\": \"abc\" /* comment */"
+      "\"default_route\": \"abc\" /* comment */, "
+      "\"thrift_compression_threshold\": \"768\""
       "},"
       "\"standalone_options\": {"
       "\"port\": \"11001\", "
@@ -52,13 +51,14 @@ TEST(Flavor, readStandaloneFlavor) {
   std::string flavor = eraseStr(flavorPath, "-standalone");
   EXPECT_TRUE(readFlavor(flavor, standalone_opts, libmcrouter_opts));
 
-  EXPECT_EQ(3, libmcrouter_opts.size());
+  EXPECT_EQ(4, libmcrouter_opts.size());
   EXPECT_EQ(1, libmcrouter_opts.count("default_route"));
   EXPECT_EQ("abc", libmcrouter_opts["default_route"]);
   EXPECT_EQ(1, libmcrouter_opts.count("router_name"));
   EXPECT_EQ("web", libmcrouter_opts["router_name"]);
   EXPECT_EQ(1, libmcrouter_opts.count("flavor_name"));
   EXPECT_EQ(flavor, libmcrouter_opts["flavor_name"]);
+  EXPECT_EQ("768", libmcrouter_opts["thrift_compression_threshold"]);
   EXPECT_EQ(2, standalone_opts.size());
   EXPECT_EQ(1, standalone_opts.count("port"));
   EXPECT_EQ("11001", standalone_opts["port"]);
@@ -72,7 +72,8 @@ TEST(Flavor, readLibmcrouterFlavor) {
   std::string flavorContents =
       "{"
       "\"options\": {"
-      "\"default_route\": \"abc\""
+      "\"default_route\": \"abc\", "
+      "\"thrift_compression_threshold\": \"768\""
       "}"
       "}";
   std::string flavorPath(flavorFile.path().string());
@@ -88,13 +89,14 @@ TEST(Flavor, readLibmcrouterFlavor) {
   EXPECT_TRUE(readFlavor(flavorPath, standalone_opts, libmcrouter_opts));
 
   EXPECT_EQ(0, standalone_opts.size());
-  EXPECT_EQ(3, libmcrouter_opts.size());
+  EXPECT_EQ(4, libmcrouter_opts.size());
   EXPECT_EQ(1, libmcrouter_opts.count("default_route"));
   EXPECT_EQ("abc", libmcrouter_opts["default_route"]);
   EXPECT_EQ(1, libmcrouter_opts.count("router_name"));
   EXPECT_EQ("web", libmcrouter_opts["router_name"]);
   EXPECT_EQ(1, libmcrouter_opts.count("flavor_name"));
   EXPECT_EQ(flavorPath, libmcrouter_opts["flavor_name"]);
+  EXPECT_EQ("768", libmcrouter_opts["thrift_compression_threshold"]);
 }
 
 TEST(Flavor, readFlavorFromTwoFiles) {

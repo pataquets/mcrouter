@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <gtest/gtest.h>
 
 #include <folly/dynamic.h>
@@ -24,6 +22,10 @@
 using carbon::JsonClient;
 using carbon::tools::CmdLineClient;
 using namespace facebook::memcache;
+
+const std::string kPemCaPath = "mcrouter/lib/network/test/ca_cert.pem";
+const std::string kPemCertPath = "mcrouter/lib/network/test/test_cert.pem";
+const std::string kPemKeyPath = "mcrouter/lib/network/test/test_key.pem";
 
 namespace carbon {
 namespace test {
@@ -53,7 +55,7 @@ class TestJsonClient : public JsonClient {
 
 struct CarbonTestOnRequest {
   void onRequest(McServerRequestContext&& ctx, TestRequest&& request) {
-    TestReply reply(mc_res_ok);
+    TestReply reply(carbon::Result::OK);
     reply.valInt32() = request.testInt32() * 2;
     reply.valInt64() = request.testInt64() * 2;
     McServerRequestContext::reply(std::move(ctx), std::move(reply));
@@ -62,37 +64,52 @@ struct CarbonTestOnRequest {
       McServerRequestContext&& ctx,
       TestRequestStringKey&& /* request */) {
     McServerRequestContext::reply(
-        std::move(ctx), TestReplyStringKey(mc_res_notfound));
+        std::move(ctx), TestReplyStringKey(carbon::Result::NOTFOUND));
   }
 };
 
-std::unique_ptr<AsyncMcServer> startServer(int existingSocketFd) {
+std::unique_ptr<AsyncMcServer> startServer(
+    int existingSocketFd,
+    bool useSsl = false) {
   AsyncMcServer::Options opts;
-  opts.existingSocketFd = existingSocketFd;
+  opts.existingSocketFds = {existingSocketFd};
   opts.numThreads = 1;
+
+  if (useSsl) {
+    opts.pemCaPath = kPemCaPath;
+    opts.pemCertPath = kPemCertPath;
+    opts.pemKeyPath = kPemKeyPath;
+  }
 
   auto server = std::make_unique<AsyncMcServer>(std::move(opts));
 
-  server->spawn(
-      [](size_t /* threadId */,
-         folly::EventBase& evb,
-         AsyncMcServerWorker& worker) {
-        worker.setOnRequest(CarbonTestRequestHandler<CarbonTestOnRequest>());
+  server->spawn([](size_t /* threadId */,
+                   folly::EventBase& evb,
+                   AsyncMcServerWorker& worker) {
+    worker.setOnRequest(CarbonTestRequestHandler<CarbonTestOnRequest>());
 
-        while (worker.isAlive() || worker.writesPending()) {
-          evb.loopOnce();
-        }
-      });
+    while (worker.isAlive() || worker.writesPending()) {
+      evb.loopOnce();
+    }
+  });
 
   return server;
 }
 
 JsonClient::Options getClientOpts(
     uint16_t port,
+    bool useSsl = false,
     bool ignoreParsingErrors = true) {
   JsonClient::Options opts;
   opts.port = port;
   opts.ignoreParsingErrors = ignoreParsingErrors;
+  opts.useSsl = useSsl;
+  if (useSsl) {
+    opts.useSsl = useSsl;
+    opts.pemCaPath = kPemCaPath;
+    opts.pemCertPath = kPemCertPath;
+    opts.pemKeyPath = kPemKeyPath;
+  }
   return opts;
 }
 
@@ -104,6 +121,15 @@ inline void checkIntField(
   ASSERT_EQ(1, json.count(name));
   ASSERT_TRUE(json[name].isInt());
   EXPECT_EQ(static_cast<int64_t>(expected), json[name].asInt());
+}
+
+inline void checkStringField(
+    const folly::dynamic& json,
+    folly::StringPiece name,
+    std::string expected) {
+  ASSERT_EQ(1, json.count(name));
+  ASSERT_TRUE(json[name].isString());
+  EXPECT_EQ(expected, json[name].asString());
 }
 
 } // anonymous namespace
@@ -127,7 +153,34 @@ TEST(JsonClient, sendRequests) {
   ASSERT_TRUE(result);
   ASSERT_TRUE(reply.isObject());
 
-  checkIntField(reply, "result", mc_res_ok);
+  checkStringField(reply, "result", carbon::resultToString(carbon::Result::OK));
+  checkIntField(reply, "valInt32", 34);
+  checkIntField(reply, "valInt64", 60);
+
+  server->shutdown();
+  server->join();
+}
+
+TEST(JsonClient, sendRequestsWithSsl) {
+  ListenSocket socket;
+  auto server = startServer(socket.getSocketFd(), true);
+  TestJsonClient client(getClientOpts(socket.getPort(), true));
+
+  const std::string payload = R"json(
+    {
+      "key": "abcdef",
+      "testBool": true,
+      "testInt32": 17,
+      "testInt64": 30
+    }
+  )json";
+
+  folly::dynamic reply;
+  auto result = client.sendRequests("test", folly::parseJson(payload), reply);
+  ASSERT_TRUE(result);
+  ASSERT_TRUE(reply.isObject());
+
+  checkStringField(reply, "result", carbon::resultToString(carbon::Result::OK));
   checkIntField(reply, "valInt32", 34);
   checkIntField(reply, "valInt64", 60);
 
@@ -160,11 +213,13 @@ TEST(JsonClient, sendRequests_Array) {
   ASSERT_TRUE(result);
   ASSERT_TRUE(replies.isArray());
 
-  checkIntField(replies[0], "result", mc_res_ok);
+  checkStringField(
+      replies[0], "result", carbon::resultToString(carbon::Result::OK));
   checkIntField(replies[0], "valInt32", 20);
   checkIntField(replies[0], "valInt64", 60);
 
-  checkIntField(replies[1], "result", mc_res_ok);
+  checkStringField(
+      replies[1], "result", carbon::resultToString(carbon::Result::OK));
   checkIntField(replies[1], "valInt32", 70);
   checkIntField(replies[1], "valInt64", 100);
 
@@ -177,13 +232,14 @@ TEST(CmdLineClient, sendRequests) {
   auto server = startServer(socket.getSocketFd());
   auto portStr = folly::to<std::string>(socket.getPort());
 
-  std::array<const char*, 7> argv = {{"binaryName",
-                                      "-h",
-                                      "localhost",
-                                      "-p",
-                                      portStr.c_str(),
-                                      "test", // Request name
-                                      R"json(
+  std::array<const char*, 7> argv = {
+      {"binaryName",
+       "-h",
+       "localhost",
+       "-p",
+       portStr.c_str(),
+       "test", // Request name
+       R"json(
         {
           "key": "abcdef",
           "testBool": true,
@@ -206,7 +262,7 @@ TEST(CmdLineClient, sendRequests) {
 
   auto reply = folly::parseJson(out);
 
-  checkIntField(reply, "result", mc_res_ok);
+  checkStringField(reply, "result", carbon::resultToString(carbon::Result::OK));
   checkIntField(reply, "valInt32", 34);
   checkIntField(reply, "valInt64", 60);
 
@@ -219,13 +275,14 @@ TEST(CmdLineClient, sendRequests_InvalidJson) {
   auto server = startServer(socket.getSocketFd());
   auto portStr = folly::to<std::string>(socket.getPort());
 
-  std::array<const char*, 7> argv = {{"binaryName",
-                                      "-h",
-                                      "localhost",
-                                      "-p",
-                                      portStr.c_str(),
-                                      "test", // Request name
-                                      "Invalid json."}};
+  std::array<const char*, 7> argv = {
+      {"binaryName",
+       "-h",
+       "localhost",
+       "-p",
+       portStr.c_str(),
+       "test", // Request name
+       "Invalid json."}};
 
   std::stringstream outStream(std::ios::out | std::ios::in);
   std::stringstream errStream(std::ios::out | std::ios::in);
@@ -249,13 +306,14 @@ TEST(CmdLineClient, sendRequests_InvalidRequestName) {
   auto server = startServer(socket.getSocketFd());
   auto portStr = folly::to<std::string>(socket.getPort());
 
-  std::array<const char*, 7> argv = {{"binaryName",
-                                      "-h",
-                                      "localhost",
-                                      "-p",
-                                      portStr.c_str(),
-                                      "abc", // Request name
-                                      R"json(
+  std::array<const char*, 7> argv = {
+      {"binaryName",
+       "-h",
+       "localhost",
+       "-p",
+       portStr.c_str(),
+       "abc", // Request name
+       R"json(
         {
           "key": "abcdef",
           "testBool": true,
@@ -281,5 +339,5 @@ TEST(CmdLineClient, sendRequests_InvalidRequestName) {
   server->join();
 }
 
-} // test
-} // carbon
+} // namespace test
+} // namespace carbon

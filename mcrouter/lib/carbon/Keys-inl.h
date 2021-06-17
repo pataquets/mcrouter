@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <iostream>
 #include <utility>
 
@@ -43,6 +41,10 @@ Keys<Storage>& Keys<Storage>::operator=(Keys<Storage>&& other) noexcept {
 
 template <class Storage>
 void Keys<Storage>::update() {
+  if constexpr (std::is_same_v<Storage, folly::IOBuf>) {
+    key_.coalesce();
+  }
+
   const folly::StringPiece key = fullKey();
   keyWithoutRoute_ = key;
   routingPrefix_.reset(key.begin(), 0);
@@ -61,11 +63,18 @@ void Keys<Storage>::update() {
     }
   }
   routingKey_ = keyWithoutRoute_;
-  size_t pos = keyWithoutRoute_.find("|#|");
+  // Micro-optimization: We use find_first_of as a first pass while looking for
+  // the hash stop because searching for a single character is faster than
+  // looking for a substring. Most keys in practice don't have a hash stop or a
+  // '|' character.
+  size_t pos = keyWithoutRoute_.find_first_of('|');
   if (pos != std::string::npos) {
-    routingKey_.reset(keyWithoutRoute_.begin(), pos);
+    pos = keyWithoutRoute_.find("|#|", pos);
+    if (pos != std::string::npos) {
+      routingKey_.reset(keyWithoutRoute_.begin(), pos);
+    }
   }
   routingKeyHash_ = 0;
 }
 
-} // carbon
+} // namespace carbon

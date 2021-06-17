@@ -1,21 +1,20 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/Range.h>
 
+#include "mcrouter/lib/HashFunctionType.h"
 #include "mcrouter/lib/fbi/hash.h"
 
 namespace folly {
 struct dynamic;
-} // folly
+} // namespace folly
 
 namespace facebook {
 namespace memcache {
@@ -37,8 +36,12 @@ class Ch3HashFunc {
     return "Ch3";
   }
 
+  static HashFunctionType typeId() {
+    return HashFunctionType::CH3;
+  }
+
  private:
   size_t n_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

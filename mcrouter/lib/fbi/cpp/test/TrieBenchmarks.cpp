@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <string>
 #include <vector>
 
@@ -53,9 +51,9 @@ class KeyPrefixMap : public folly::StringKeyedUnorderedMap<Value> {
     return result;
   }
 
-  using Base::find;
   using Base::begin;
   using Base::end;
+  using Base::find;
 
  private:
   std::vector<size_t> prefixLength_;
@@ -70,7 +68,10 @@ int x = 0;
 void prepareRand() {
   std::vector<std::string> keys[3] = {
       {
-          "abacaba", "abacabadabacaba", "b123", "qwerty:qwerty:qwerty:123456",
+          "abacaba",
+          "abacabadabacaba",
+          "b123",
+          "qwerty:qwerty:qwerty:123456",
       },
       {
           "AMC", "ayk", "brq", "bxj", "fgn", "fkr", "fm0", "gig", "gtg",

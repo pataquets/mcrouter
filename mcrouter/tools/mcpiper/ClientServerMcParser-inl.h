@@ -1,18 +1,16 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <utility>
 
 #include "mcrouter/lib/network/TypedMsg.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 namespace facebook {
 namespace memcache {
@@ -23,7 +21,7 @@ namespace detail {
 inline bool isRequestTypeId(uint32_t typeId) {
   return typeId % 2 == 1;
 }
-} // detail
+} // namespace detail
 
 template <class Callback, class RequestList>
 void ClientServerMcParser<Callback, RequestList>::parse(
@@ -65,5 +63,5 @@ void ClientServerMcParser<Callback, RequestList>::parse(
     source += numBytes;
   }
 }
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

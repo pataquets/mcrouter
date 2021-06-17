@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "ConfigApi.h"
 
 #include <memory>
@@ -14,8 +12,10 @@
 #include <boost/filesystem.hpp>
 
 #include <folly/FileUtil.h>
+#include <folly/Random.h>
 #include <folly/String.h>
 #include <folly/dynamic.h>
+#include <folly/io/async/ScopedEventBaseThread.h>
 
 #include "mcrouter/CarbonRouterInstance.h"
 #include "mcrouter/FileDataProvider.h"
@@ -106,13 +106,16 @@ struct TouchFileTag;
 const char* const ConfigApi::kFilePrefix = "file:";
 
 ConfigApi::~ConfigApi() {
-  /* Must be here to forward declare FileDataProvider */
+  dumpConfigToDiskExecutor_.reset();
 }
 
 ConfigApi::ConfigApi(const McrouterOptions& opts)
     : opts_(opts),
       finish_(false),
-      dumpConfigToDisk_(setupDumpConfigToDisk(opts)) {}
+      dumpConfigToDiskExecutor_(
+          setupDumpConfigToDisk(opts)
+              ? std::make_unique<folly::ScopedEventBaseThread>("mcrcfgdump")
+              : nullptr) {}
 
 ConfigApi::CallbackHandle ConfigApi::subscribe(Callback callback) {
   return callbacks_.subscribe(std::move(callback));
@@ -216,7 +219,26 @@ void ConfigApi::configThreadRun() {
     }
 
     if (hasUpdate) {
+      if (opts_.reconfiguration_jitter_ms) {
+        int jitter_ms =
+            folly::Random::randDouble01() * opts_.reconfiguration_jitter_ms;
+        std::unique_lock<std::mutex> lk(finishMutex_);
+        finishCV_.wait_for(
+            lk,
+            std::chrono::milliseconds(
+                opts_.reconfiguration_delay_ms + jitter_ms),
+            [this] { return finish_.load(); });
+      }
       callbacks_.notify();
+
+      // waits before checking for config updates again.
+      if (opts_.post_reconfiguration_delay_ms > 0) {
+        std::unique_lock<std::mutex> lk(finishMutex_);
+        finishCV_.wait_for(
+            lk,
+            std::chrono::milliseconds(opts_.post_reconfiguration_delay_ms),
+            [this] { return finish_.load(); });
+      }
     }
 
     // Otherwise there was nothing to read, so check that we aren't shutting
@@ -322,6 +344,10 @@ bool ConfigApi::get(
   return true;
 }
 
+bool ConfigApi::partialReconfigurableSource(const std::string&, std::string&) {
+  return false;
+}
+
 void ConfigApi::trackConfigSources() {
   std::lock_guard<std::mutex> lock(fileInfoMutex_);
   tracking_ = true;
@@ -330,7 +356,7 @@ void ConfigApi::trackConfigSources() {
 void ConfigApi::subscribeToTrackedSources() {
   std::lock_guard<std::mutex> lock(fileInfoMutex_);
   assert(tracking_);
-  lastConfigFromBackupFiles_ = shouldReadFromBackupFiles();
+  auto lastConfigFromBackupFiles = shouldReadFromBackupFiles();
   tracking_ = false;
   isFirstConfig_ = false;
   readFromBackupFiles_ = false;
@@ -339,7 +365,9 @@ void ConfigApi::subscribeToTrackedSources() {
     // start watching for updates
     for (auto& it : trackedFiles_) {
       auto& file = it.second;
-      dumpConfigSourceToDisk(kFilePrefix, file.path, file.content, file.md5);
+      if (!lastConfigFromBackupFiles) {
+        dumpConfigSourceToDisk(kFilePrefix, file.path, file.content, file.md5);
+      }
       try {
         if (!file.provider) {
           // reuse existing providers
@@ -416,52 +444,58 @@ bool ConfigApi::isFirstConfig() const {
 void ConfigApi::dumpConfigSourceToDisk(
     const std::string& sourcePrefix,
     const std::string& name,
-    const std::string& contents,
+    std::string contents,
     const std::string& md5OrVersion) {
-  if (!dumpConfigToDisk_ || lastConfigFromBackupFiles_) {
+  if (!dumpConfigToDiskExecutor_) {
     return;
   }
 
-  auto directory = getBackupConfigDirectory(opts_);
-  auto filePath =
-      (directory / getBackupConfigFileName(sourcePrefix, name)).string();
+  dumpConfigToDiskExecutor_->add([this,
+                                  sourcePrefix,
+                                  name,
+                                  contents = std::move(contents),
+                                  md5OrVersion]() {
+    auto directory = getBackupConfigDirectory(opts_);
+    auto filePath =
+        (directory / getBackupConfigFileName(sourcePrefix, name)).string();
 
-  bool shouldRewrite = true;
-  auto backupFileIt = backupFiles_.find(filePath);
-  if (backupFileIt == backupFiles_.end()) {
-    backupFileIt = backupFiles_.emplace(filePath, "").first;
-  } else {
-    shouldRewrite = (backupFileIt->second != md5OrVersion);
-  }
-
-  if (shouldRewrite) {
-    if (atomicallyWriteFileToDisk(contents, filePath)) {
-      // Makes sure the file has the correct permission for when we decide to
-      // run mcrouter with another user.
-      ensureHasPermission(filePath, 0666);
-      backupFileIt->second = md5OrVersion;
+    bool shouldRewrite = true;
+    auto backupFileIt = backupFiles_.find(filePath);
+    if (backupFileIt == backupFiles_.end()) {
+      backupFileIt = backupFiles_.emplace(filePath, "").first;
     } else {
-      logFailureEveryN<DumpFileTag>(
-          opts_,
-          memcache::failure::Category::kOther,
-          folly::sformat(
-              "Error while dumping last valid config to disk. "
-              "Failed to write file {}.",
-              filePath),
-          1000);
-      ensureConfigDirectoryExists(directory);
+      shouldRewrite = (backupFileIt->second != md5OrVersion);
     }
-  } else {
-    if (!touchFile(filePath)) {
-      logFailureEveryN<TouchFileTag>(
-          opts_,
-          memcache::failure::Category::kOther,
-          folly::sformat(
-              "Error while touching backup config file {}", filePath),
-          1000);
-      ensureConfigDirectoryExists(directory);
+
+    if (shouldRewrite) {
+      if (atomicallyWriteFileToDisk(contents, filePath)) {
+        // Makes sure the file has the correct permission for when we decide to
+        // run mcrouter with another user.
+        ensureHasPermission(filePath, 0664);
+        backupFileIt->second = md5OrVersion;
+      } else {
+        logFailureEveryN<DumpFileTag>(
+            opts_,
+            memcache::failure::Category::kOther,
+            folly::sformat(
+                "Error while dumping last valid config to disk. "
+                "Failed to write file {}.",
+                filePath),
+            1000);
+        ensureConfigDirectoryExists(directory);
+      }
+    } else {
+      if (!touchFile(filePath)) {
+        logFailureEveryN<TouchFileTag>(
+            opts_,
+            memcache::failure::Category::kOther,
+            folly::sformat(
+                "Error while touching backup config file {}", filePath),
+            1000);
+        ensureConfigDirectoryExists(directory);
+      }
     }
-  }
+  });
 }
 
 bool ConfigApi::readFromBackupFile(
@@ -509,6 +543,17 @@ bool ConfigApi::shouldReadFromBackupFiles() const {
   return readFromBackupFiles_;
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+std::vector<ConfigApi::PartialUpdate> ConfigApi::releasePartialUpdatesLocked() {
+  return {};
+}
+
+bool ConfigApi::updatePartialConfigSource(
+    std::vector<ConfigApi::PartialUpdate> /*updates*/) {
+  return true;
+}
+
+void ConfigApi::addPartialUpdateForTest(PartialUpdate&) {}
+
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

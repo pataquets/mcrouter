@@ -1,20 +1,24 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
+#include <bitset>
+#include <map>
 #include <memory>
 #include <utility>
 
 #include <folly/Range.h>
 #include <folly/ScopeGuard.h>
+#include <folly/container/F14Map.h>
 #include <folly/fibers/FiberManager.h>
+#include <folly/lang/Aligned.h>
+
+#include "mcrouter/lib/network/ServerLoad.h"
 
 namespace facebook {
 namespace memcache {
@@ -50,15 +54,28 @@ class RequestClass {
   uint32_t mask_{0};
 };
 
+using ExtraDataMap = folly::F14FastMap<std::string, std::string>;
+using ExtraDataCallbackT = std::function<ExtraDataMap()>;
+
 template <class RouterInfo>
 class fiber_local {
  private:
-  struct McrouterFiberContext {
+  enum FeatureFlag : size_t {
+    FAILOVER_DISABLED,
+    THRIFT_SERVER_LOAD_ENABLED,
+    NUM_FLAGS
+  };
+
+  struct alignas(folly::cacheline_align_v) McrouterFiberContext {
     std::shared_ptr<ProxyRequestContextWithInfo<RouterInfo>> sharedCtx;
-    folly::StringPiece asynclogName;
+    std::bitset<NUM_FLAGS> featureFlags;
+    int32_t selectedIndex{-1};
+    uint32_t failoverCount{0};
     RequestClass requestClass;
-    bool failoverTag{false};
-    bool failoverDisabled{false};
+    folly::StringPiece asynclogName;
+    int64_t networkTransportTimeUs{0};
+    ServerLoad load{0};
+    std::vector<ExtraDataCallbackT> extraDataCallbacks;
   };
 
  public:
@@ -157,17 +174,34 @@ class fiber_local {
   }
 
   /**
-   * Update failover tag for current fiber (thread, if we're not on fiber)
+   * Increment failover count for current fiber (thread, if we're not on fiber)
+   * and return the new value
    */
-  static void setFailoverTag(bool value) {
-    folly::fibers::local<McrouterFiberContext>().failoverTag = value;
+  static uint32_t incFailoverCount() {
+    folly::fibers::local<McrouterFiberContext>().failoverCount += 1;
+    return folly::fibers::local<McrouterFiberContext>().failoverCount;
   }
 
   /**
-   * Get failover tag of current fiber (thread, if we're not on fiber)
+   * Get failover count of current fiber (thread, if we're not on fiber)
    */
-  static bool getFailoverTag() {
-    return folly::fibers::local<McrouterFiberContext>().failoverTag;
+  static uint32_t getFailoverCount() {
+    return folly::fibers::local<McrouterFiberContext>().failoverCount;
+  }
+
+  /**
+   * Set selected index for normal reply from the target_ list.
+   * it will be used for the iterator to avoid getting duplicates
+   */
+  static void setSelectedIndex(int32_t value) {
+    folly::fibers::local<McrouterFiberContext>().selectedIndex = value;
+  }
+
+  /**
+   * Get selected index for normal reply
+   */
+  static int32_t getSelectedIndex() {
+    return folly::fibers::local<McrouterFiberContext>().selectedIndex;
   }
 
   /**
@@ -175,17 +209,74 @@ class fiber_local {
    * fiber)
    */
   static void setFailoverDisabled(bool value) {
-    folly::fibers::local<McrouterFiberContext>().failoverDisabled = value;
+    folly::fibers::local<McrouterFiberContext>().featureFlags.set(
+        FeatureFlag::FAILOVER_DISABLED, value);
   }
 
   /**
    * Get failover disabled tag of current fiber (thread, if we're not on fiber)
    */
   static bool getFailoverDisabled() {
-    return folly::fibers::local<McrouterFiberContext>().failoverDisabled;
+    return folly::fibers::local<McrouterFiberContext>().featureFlags.test(
+        FeatureFlag::FAILOVER_DISABLED);
+  }
+
+  static void setServerLoad(ServerLoad load) {
+    folly::fibers::local<McrouterFiberContext>().load = load;
+  }
+
+  static ServerLoad getServerLoad() {
+    return folly::fibers::local<McrouterFiberContext>().load;
+  }
+
+  static void incNetworkTransportTimeBy(int64_t duration_us) {
+    folly::fibers::local<McrouterFiberContext>().networkTransportTimeUs +=
+        duration_us;
+  }
+
+  static int64_t getNetworkTransportTimeUs() {
+    return folly::fibers::local<McrouterFiberContext>().networkTransportTimeUs;
+  }
+
+  static void setThriftServerLoadEnabled(bool value) {
+    folly::fibers::local<McrouterFiberContext>().featureFlags.set(
+        FeatureFlag::THRIFT_SERVER_LOAD_ENABLED, value);
+  }
+
+  static bool getThriftServerLoadEnabled() {
+    return folly::fibers::local<McrouterFiberContext>().featureFlags.test(
+        FeatureFlag::THRIFT_SERVER_LOAD_ENABLED);
+  }
+
+  /**
+   * Add callback function to compute extra data for logging.
+   * @return The index of new added callback function.
+   */
+  static size_t addExtraDataCallbacks(ExtraDataCallbackT&& callback) {
+    auto& callbacks =
+        folly::fibers::local<McrouterFiberContext>().extraDataCallbacks;
+    callbacks.push_back(std::move(callback));
+    return callbacks.size() - 1;
+  }
+
+  /**
+   * Update callback function to compute extra data for logging on position idx.
+   */
+  static void updateExtraDataCallbacks(
+      size_t idx,
+      ExtraDataCallbackT&& callback) {
+    folly::fibers::local<McrouterFiberContext>().extraDataCallbacks[idx] =
+        std::move(callback);
+  }
+
+  /**
+   * Return all callback functions to compute extra data for logging.
+   */
+  static const std::vector<ExtraDataCallbackT>& getExtraDataCallbacks() {
+    return folly::fibers::local<McrouterFiberContext>().extraDataCallbacks;
   }
 };
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

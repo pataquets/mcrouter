@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -125,6 +123,16 @@ class Ref {
     return t;
   }
 
+  /**
+   * reset the managed object
+   */
+  void reset() noexcept {
+    if (ref_) {
+      RefPolicy::decref(ref_);
+      ref_ = nullptr;
+    }
+  }
+
   ~Ref() noexcept {
     RefPolicy::decref(ref_);
   }
@@ -134,5 +142,5 @@ class Ref {
 
   explicit Ref(T* ref) noexcept : ref_(ref) {}
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

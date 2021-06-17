@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <stdint.h>
@@ -22,7 +20,7 @@ class ListenSocket {
   /**
    * @throws std::runtime_error  if failed to create a listen socket
    */
-  ListenSocket();
+  explicit ListenSocket(bool zeroCopyEnabled = false);
   ~ListenSocket();
 
   uint16_t getPort() const {
@@ -71,5 +69,5 @@ class ListenSocket {
  * @return true  if port is open, false otherwise
  */
 bool isPortOpen(uint16_t port);
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

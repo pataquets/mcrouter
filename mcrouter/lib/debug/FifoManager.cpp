@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "FifoManager.h"
 
 #include <signal.h>
@@ -17,6 +15,7 @@
 #include <mutex>
 
 #include <folly/Format.h>
+#include <folly/system/ThreadName.h>
 
 namespace facebook {
 namespace memcache {
@@ -36,6 +35,7 @@ FifoManager::FifoManager() {
   signal(SIGPIPE, SIG_IGN);
 
   thread_ = std::thread([this]() {
+    folly::setThreadName("mcr-fifo-mngr");
     while (true) {
       fifos_.withRLock([](const auto& fifos) {
         for (auto& kv : fifos) {
@@ -105,5 +105,5 @@ void FifoManager::clear() {
   return folly::Singleton<FifoManager>::try_get();
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

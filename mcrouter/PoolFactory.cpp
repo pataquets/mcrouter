@@ -1,17 +1,15 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "PoolFactory.h"
 
 #include <folly/json.h>
 
-#include "mcrouter/ConfigApi.h"
+#include "mcrouter/ConfigApiIf.h"
 #include "mcrouter/lib/fbi/cpp/util.h"
 
 namespace facebook {
@@ -31,6 +29,14 @@ PoolFactory::PoolFactory(const folly::dynamic& config, ConfigApiIf& configApi)
   }
 }
 
+PoolFactory::PoolFactory(
+    const folly::dynamic& config,
+    ConfigApiIf& configApi,
+    folly::json::metadata_map configMetadataMap)
+    : PoolFactory(config, configApi) {
+  configMetadataMap_ = std::move(configMetadataMap);
+}
+
 PoolFactory::PoolJson PoolFactory::parseNamedPool(folly::StringPiece name) {
   auto existingIt = pools_.find(name);
   if (existingIt == pools_.end()) {
@@ -40,11 +46,16 @@ PoolFactory::PoolJson PoolFactory::parseNamedPool(folly::StringPiece name) {
         configApi_.get(ConfigType::Pool, name.str(), jsonStr),
         "Can not read pool: {}",
         name);
+    auto json = parseJsonString(jsonStr);
+    std::string poolConfigPath;
+    auto partialReconfig =
+        configApi_.partialReconfigurableSource(name.str(), poolConfigPath);
+    if (partialReconfig) {
+      json["enable_partial_reconfig"] = partialReconfig;
+      json["pool_config_path"] = poolConfigPath;
+    }
     existingIt =
-        pools_
-            .emplace(
-                name,
-                std::make_pair(parseJsonString(jsonStr), PoolState::PARSED))
+        pools_.emplace(name, std::make_pair(std::move(json), PoolState::PARSED))
             .first;
     return PoolJson(existingIt->first, existingIt->second.first);
   }
@@ -64,6 +75,16 @@ PoolFactory::PoolJson PoolFactory::parseNamedPool(folly::StringPiece name) {
 
   if (auto jInherit = json.get_ptr("inherit")) {
     checkLogic(jInherit->isString(), "Pool {}: inherit is not a string", name);
+    std::string poolConfigPath;
+    auto partialReconfig = configApi_.partialReconfigurableSource(
+        jInherit->getString(), poolConfigPath);
+    if (partialReconfig) {
+      json["enable_partial_reconfig"] = partialReconfig;
+      json["pool_config_path"] = poolConfigPath;
+    }
+    if (json.get_ptr("servers")) {
+      json["enable_partial_reconfig"] = false;
+    }
     auto& newJson = parseNamedPool(jInherit->stringPiece()).json;
     json.update_missing(newJson);
     json.erase("inherit");
@@ -84,6 +105,6 @@ PoolFactory::PoolJson PoolFactory::parsePool(const folly::dynamic& json) {
   pools_.emplace(jname->stringPiece(), std::make_pair(json, PoolState::NEW));
   return parseNamedPool(jname->stringPiece());
 }
-}
-}
-} // facebook::memcache::mcrouter
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

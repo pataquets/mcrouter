@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -33,7 +31,7 @@ using ServiceInfoRequest = McGetRequest;
 template <class RouterInfo>
 class ServiceInfo {
  public:
-  ServiceInfo(Proxy<RouterInfo>* proxy, const ProxyConfig<RouterInfo>& config);
+  ServiceInfo(Proxy<RouterInfo>& proxy, const ProxyConfig<RouterInfo>& config);
 
   void handleRequest(
       folly::StringPiece req,
@@ -47,8 +45,8 @@ class ServiceInfo {
   std::unique_ptr<ServiceInfoImpl> impl_;
 };
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook
 
 #include "ServiceInfo-inl.h"

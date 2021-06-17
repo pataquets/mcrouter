@@ -1,14 +1,8 @@
-# Copyright (c) 2016-present, Facebook, Inc.
-# All rights reserved.
+#!/usr/bin/env python3
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from mcrouter.test.MCProcess import Memcached
 from mcrouter.test.McrouterTestCase import McrouterTestCase
@@ -77,6 +71,25 @@ class TestBigvalue(McrouterTestCase):
         # Ensure a usable lease token is returned when the metadata is present
         # but one of the subpieces is missing
         self.assertTrue(mcrouter.delete('key:1:1234'))
+        reply = mcrouter.leaseGet('key')
+        self.assertTrue(reply['token'] > 1)
+        self.assertEqual(reply['value'], '')
+
+    def test_bigvalue_leases_delete_stale_value(self):
+        mcrouter = self.get_mcrouter()
+        value = 'a' * self.split_size + 'a'
+
+        # BigValueRoute will split 'value' into two pieces
+        mcrouter.set('key', '1-2-1234', flags=MC_MSG_FLAG_BIG_VALUE)  # metadata
+        mcrouter.set('key:0:1234', value[:self.split_size])  # subpiece 1
+        mcrouter.set('key:1:1234', value[self.split_size:])  # subpiece 2
+
+        # Check that our manual imitation of BigValueRoute worked
+        self.assertEqual(mcrouter.get('key'), value)
+
+        # Ensure a usable lease token is returned when the metadata is present
+        # but value is empty when the item is deleted
+        self.assertTrue(mcrouter.delete('key'))
         reply = mcrouter.leaseGet('key')
         self.assertTrue(reply['token'] > 1)
         self.assertEqual(reply['value'], '')

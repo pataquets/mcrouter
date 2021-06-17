@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -17,7 +15,7 @@
 #include <folly/fibers/ForEach.h>
 
 #include "mcrouter/lib/McResUtil.h"
-#include "mcrouter/lib/Operation.h"
+#include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/fbi/cpp/FuncGenerator.h"
 
@@ -41,10 +39,10 @@ class AllSyncRoute {
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    t(children_, req);
+    return t(children_, req);
   }
 
   template <class Request>
@@ -59,7 +57,8 @@ class AllSyncRoute {
     folly::Optional<Reply> reply;
     folly::fibers::forEach(
         fs.begin(), fs.end(), [&reply](size_t /* id */, Reply newReply) {
-          if (!reply || worseThan(newReply.result(), reply.value().result())) {
+          if (!reply ||
+              worseThan(*newReply.result_ref(), *reply.value().result_ref())) {
             reply = std::move(newReply);
           }
         });
@@ -69,5 +68,5 @@ class AllSyncRoute {
  private:
   const std::vector<std::shared_ptr<RouteHandleIf>> children_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

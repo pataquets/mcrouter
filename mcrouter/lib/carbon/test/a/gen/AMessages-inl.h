@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -18,33 +16,48 @@
 namespace carbon {
 namespace test {
 
+template <class Writer>
+void AnotherRequest::serialize(Writer&& writer) const {
+  writer.writeStructBegin();
+  writer.writeField(1 /* field id */, key());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
+}
+
 template <class V>
 void AnotherRequest::visitFields(V&& v) {
-  if (!v.visitField(1, "key", key_)) {
+  if (!v.visitField(1, "key", this->key())) {
     return;
   }
 }
 
 template <class V>
 void AnotherRequest::visitFields(V&& v) const {
-  if (!v.visitField(1, "key", key_)) {
+  if (!v.visitField(1, "key", this->key())) {
     return;
   }
 }
 
+template <class Writer>
+void AnotherReply::serialize(Writer&& writer) const {
+  writer.writeStructBegin();
+  writer.writeField(1 /* field id */, result());
+  writer.writeFieldStop();
+  writer.writeStructEnd();
+}
+
 template <class V>
 void AnotherReply::visitFields(V&& v) {
-  if (!v.visitField(1, "result", result_)) {
+  if (!v.visitField(1, "result", this->result())) {
     return;
   }
 }
 
 template <class V>
 void AnotherReply::visitFields(V&& v) const {
-  if (!v.visitField(1, "result", result_)) {
+  if (!v.visitField(1, "result", this->result())) {
     return;
   }
 }
-
 } // namespace test
 } // namespace carbon

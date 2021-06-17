@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -18,21 +16,26 @@
 #include "mcrouter/lib/carbon/connection/CarbonConnectionUtil.h"
 #include "mcrouter/lib/fbi/counting_sem.h"
 #include "mcrouter/lib/network/AsyncMcClient.h"
+#include "mcrouter/lib/network/ThriftTransport.h"
 
 namespace carbon {
 
+template <class Transport>
+class Impl;
+
+struct ExternalCarbonConnectionImplOptions {
+  size_t maxOutstanding{0};
+  bool maxOutstandingError{false};
+  uint16_t portOverride{0};
+};
+
+template <class RouterInfo>
 class ExternalCarbonConnectionImpl {
  public:
-  struct Options {
-    Options() {}
-
-    size_t maxOutstanding{0};
-    bool maxOutstandingError{false};
-  };
-
   explicit ExternalCarbonConnectionImpl(
       facebook::memcache::ConnectionOptions connectionOptions,
-      Options options = Options());
+      ExternalCarbonConnectionImplOptions options =
+          ExternalCarbonConnectionImplOptions());
 
   ~ExternalCarbonConnectionImpl() = default;
 
@@ -64,12 +67,15 @@ class ExternalCarbonConnectionImpl {
   }
 
  private:
-  facebook::memcache::ConnectionOptions connectionOptions_;
-  Options options_;
+  void makeImpl();
 
-  class Impl;
-  std::unique_ptr<Impl> impl_;
+  facebook::memcache::ConnectionOptions connectionOptions_;
+  ExternalCarbonConnectionImplOptions options_;
+
+  std::unique_ptr<Impl<facebook::memcache::AsyncMcClient>> carbonImpl_;
+  std::unique_ptr<Impl<facebook::memcache::ThriftTransport<RouterInfo>>>
+      thriftImpl_;
 };
-} // carbon
+} // namespace carbon
 
 #include "ExternalCarbonConnectionImpl-inl.h"

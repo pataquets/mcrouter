@@ -1,23 +1,43 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "BigValueRoute.h"
 
 #include <folly/Format.h>
 #include <folly/fibers/WhenN.h>
 
-#include "mcrouter/lib/AuxiliaryCPUThreadPool.h"
 #include "mcrouter/routes/McrouterRouteHandle.h"
 
 namespace facebook {
 namespace memcache {
 namespace mcrouter {
+
+namespace detail {
+
+// Hashes value on a separate CPU thread pool, preempts fiber until hashing is
+// complete.
+uint64_t hashBigValue(const folly::IOBuf& value) {
+  if (auto singleton = AuxiliaryCPUThreadPoolSingleton::try_get_fast()) {
+    auto& threadPool = singleton->getThreadPool();
+    return folly::fibers::await([&](folly::fibers::Promise<uint64_t> promise) {
+      threadPool.add([promise = std::move(promise), &value]() mutable {
+        auto hash = folly::IOBufHash()(value);
+        // Note: for compatibility with old code running in production we're
+        // using only 32-bits of hash.
+        promise.setValue(hash & ((1ull << 32) - 1));
+      });
+    });
+  }
+  throwRuntime(
+      "Mcrouter CPU Thread pool is not running, cannot calculate hash for big "
+      "value!");
+}
+
+} // namespace detail
 
 McMetagetReply BigValueRoute::route(const McMetagetRequest& req) const {
   // TODO: Make metaget work with BigValueRoute. One way to make this work well
@@ -34,25 +54,33 @@ McLeaseGetReply BigValueRoute::doLeaseGetRoute(
     const McLeaseGetRequest& req,
     size_t retriesLeft) const {
   auto initialReply = ch_->route(req);
-  if (!(initialReply.flags() & MC_MSG_FLAG_BIG_VALUE) ||
-      !isHitResult(initialReply.result())) {
+  bool isBigValue = ((*initialReply.flags_ref() & MC_MSG_FLAG_BIG_VALUE) != 0);
+  if (!isBigValue) {
     return initialReply;
   }
 
-  ChunksInfo chunksInfo(coalesceAndGetRange(initialReply.value()));
+  if (!isHitResult(*initialReply.result_ref())) {
+    // if bigValue item, create a new reply with result, lease-token and return
+    // so that we don't send any meta data that may be present in initialReply
+    McLeaseGetReply reply(*initialReply.result_ref());
+    reply.leaseToken_ref() = *initialReply.leaseToken_ref();
+    return reply;
+  }
+
+  ChunksInfo chunksInfo(coalesceAndGetRange(initialReply.value_ref()));
   if (!chunksInfo.valid()) {
-    // We cannot return mc_res_notfound without a valid lease token. We err on
-    // the side of allowing clients to make progress by returning a lease token
-    // of -1.
-    McLeaseGetReply missReply(mc_res_notfound);
-    missReply.leaseToken() = static_cast<uint64_t>(-1);
+    // We cannot return carbon::Result::NOTFOUND without a valid lease token. We
+    // err on the side of allowing clients to make progress by returning a lease
+    // token of -1.
+    McLeaseGetReply missReply(carbon::Result::NOTFOUND);
+    missReply.leaseToken_ref() = static_cast<uint64_t>(-1);
     return missReply;
   }
 
   // Send a gets request for the metadata while sending ordinary get requests
   // to fetch the subpieces. We may need to use the returned CAS token to
   // invalidate the metadata piece later on.
-  const auto key = req.key().fullKey();
+  const auto key = req.key_ref()->fullKey();
   McGetsRequest getsMetadataReq(key);
   const auto reqs = chunkGetRequests(req, chunksInfo);
   std::vector<std::function<McGetReply()>> fs;
@@ -69,7 +97,7 @@ McLeaseGetReply BigValueRoute::doLeaseGetRoute(
   tasks.emplace_back([&getsMetadataReq, &getsMetadataReply, &target]() {
     getsMetadataReply = target.route(getsMetadataReq);
   });
-  tasks.emplace_back([ this, &replies, fs = std::move(fs) ]() mutable {
+  tasks.emplace_back([this, &replies, fs = std::move(fs)]() mutable {
     replies = collectAllByBatches(fs.begin(), fs.end());
   });
 
@@ -78,16 +106,16 @@ McLeaseGetReply BigValueRoute::doLeaseGetRoute(
       replies.begin(), replies.end(), std::move(initialReply));
 
   // Return reducedReply on hit or error
-  if (!isMissResult(reducedReply.result())) {
+  if (!isMissResult(*reducedReply.result_ref())) {
     return reducedReply;
   }
 
-  if (isErrorResult(getsMetadataReply.result())) {
+  if (isErrorResult(*getsMetadataReply.result_ref())) {
     if (retriesLeft > 0) {
       return doLeaseGetRoute(req, --retriesLeft);
     }
-    McLeaseGetReply errorReply(getsMetadataReply.result());
-    errorReply.message() = std::move(getsMetadataReply.message());
+    McLeaseGetReply errorReply(*getsMetadataReply.result_ref());
+    errorReply.message_ref() = std::move(*getsMetadataReply.message_ref());
     return errorReply;
   }
 
@@ -97,14 +125,14 @@ McLeaseGetReply BigValueRoute::doLeaseGetRoute(
   // to get a valid lease token.
   // TODO: Consider also firing off async deletes for the subpieces for better
   // cache use.
-  if (isHitResult(getsMetadataReply.result())) {
+  if (isHitResult(*getsMetadataReply.result_ref())) {
     McCasRequest invalidateReq(key);
-    invalidateReq.exptime() = -1;
-    invalidateReq.casToken() = getsMetadataReply.casToken();
+    invalidateReq.exptime_ref() = -1;
+    invalidateReq.casToken_ref() = *getsMetadataReply.casToken_ref();
     auto invalidateReply = ch_->route(invalidateReq);
-    if (isErrorResult(invalidateReply.result())) {
-      McLeaseGetReply errorReply(invalidateReply.result());
-      errorReply.message() = std::move(invalidateReply.message());
+    if (isErrorResult(*invalidateReply.result_ref())) {
+      McLeaseGetReply errorReply(*invalidateReply.result_ref());
+      errorReply.message_ref() = std::move(*invalidateReply.message_ref());
       return errorReply;
     }
   }
@@ -113,8 +141,8 @@ McLeaseGetReply BigValueRoute::doLeaseGetRoute(
     return doLeaseGetRoute(req, --retriesLeft);
   }
 
-  McLeaseGetReply reply(mc_res_remote_error);
-  reply.message() = folly::sformat(
+  McLeaseGetReply reply(carbon::Result::REMOTE_ERROR);
+  reply.message_ref() = folly::sformat(
       "BigValueRoute: exhausted retries for lease-get for key {}", key);
   return reply;
 }
@@ -174,53 +202,6 @@ folly::IOBuf BigValueRoute::createChunkKey(
       folly::sformat("{}:{}:{}", baseKey, chunkIndex, suffix));
 }
 
-namespace {
-
-// Hashes value on a separate CPU thread pool, preempts fiber until hashing is
-// complete.
-uint64_t hashBigValue(const folly::IOBuf& value) {
-  if (auto singleton = AuxiliaryCPUThreadPoolSingleton::try_get_fast()) {
-    auto& threadPool = singleton->getThreadPool();
-    return folly::fibers::await([&](folly::fibers::Promise<uint64_t> promise) {
-      threadPool.add([ promise = std::move(promise), &value ]() mutable {
-        auto hash = folly::IOBufHash()(value);
-        // Note: for compatibility with old code running in production we're
-        // using only 32-bits of hash.
-        promise.setValue(hash & ((1ull << 32) - 1));
-      });
-    });
-  }
-  throwRuntime(
-      "Mcrouter CPU Thread pool is not running, cannot calculate hash for big "
-      "value!");
-}
-
-} // anonymous
-
-std::pair<std::vector<McSetRequest>, BigValueRoute::ChunksInfo>
-BigValueRoute::chunkUpdateRequests(
-    folly::StringPiece baseKey,
-    const folly::IOBuf& value,
-    int32_t exptime) const {
-  int numChunks = (value.computeChainDataLength() + options_.threshold - 1) /
-      options_.threshold;
-  ChunksInfo info(numChunks, hashBigValue(value));
-
-  std::vector<McSetRequest> bigSetReqs;
-  bigSetReqs.reserve(numChunks);
-
-  folly::IOBuf chunkValue;
-  folly::io::Cursor cursor(&value);
-  for (int i = 0; i < numChunks; ++i) {
-    cursor.cloneAtMost(chunkValue, options_.threshold);
-    bigSetReqs.emplace_back(createChunkKey(baseKey, i, info.suffix()));
-    bigSetReqs.back().value() = std::move(chunkValue);
-    bigSetReqs.back().exptime() = exptime;
-  }
-
-  return std::make_pair(std::move(bigSetReqs), info);
-}
-
 McrouterRouteHandlePtr makeBigValueRoute(
     McrouterRouteHandlePtr rh,
     BigValueRouteOptions options) {
@@ -228,6 +209,6 @@ McrouterRouteHandlePtr makeBigValueRoute(
       std::move(rh), std::move(options));
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

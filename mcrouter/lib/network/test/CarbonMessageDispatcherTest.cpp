@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <cstring>
 
 #include <gtest/gtest.h>
@@ -15,9 +13,8 @@
 
 #include "mcrouter/lib/network/CarbonMessageDispatcher.h"
 #include "mcrouter/lib/network/McServerRequestContext.h"
-#include "mcrouter/lib/network/UmbrellaProtocol.h"
 
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 using namespace facebook::memcache;
 
@@ -34,11 +31,17 @@ struct TestCallback
   TestCallback(F&& onGet, B&& onSet)
       : onGet_(std::move(onGet)), onSet_(std::move(onSet)) {}
 
-  void onTypedMessage(McGetRequest&& req) {
+  void onTypedMessage(
+      const CaretMessageInfo& /* headerInfo */,
+      const folly::IOBuf& /* reqBuffer */,
+      McGetRequest&& req) {
     onGet_(std::move(req));
   }
 
-  void onTypedMessage(McSetRequest&& req) {
+  void onTypedMessage(
+      const CaretMessageInfo& /* headerInfo */,
+      const folly::IOBuf& /* reqBuffer */,
+      McSetRequest&& req) {
     onSet_(std::move(req));
   }
 };
@@ -46,7 +49,7 @@ struct TestCallback
 TEST(CarbonMessage, basic) {
   /* construct a request */
   McGetRequest get;
-  get.key() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "12345");
+  get.key_ref() = folly::IOBuf(folly::IOBuf::COPY_BUFFER, "12345");
 
   /* serialize into an iobuf */
   carbon::CarbonQueueAppenderStorage storage;
@@ -61,8 +64,8 @@ TEST(CarbonMessage, basic) {
     body.append(iov->iov_len);
   }
 
-  UmbrellaMessageInfo headerInfo1;
-  UmbrellaMessageInfo headerInfo2;
+  CaretMessageInfo headerInfo1;
+  CaretMessageInfo headerInfo2;
   headerInfo1.typeId = 1;
   headerInfo2.typeId = 2;
   headerInfo1.bodySize = storage.computeBodySize();
@@ -87,13 +90,13 @@ TEST(CarbonMessage, basic) {
       [&getCalled](McGetRequest&& req) {
         /* check unserialized request is the same as sent */
         getCalled = true;
-        EXPECT_EQ(req.key().fullKey(), folly::StringPiece("12345"));
+        EXPECT_EQ(req.key_ref()->fullKey(), folly::StringPiece("12345"));
       },
       [&setCalled](McSetRequest&&) { setCalled = true; });
 
   bool ret;
 
-  UmbrellaMessageInfo info;
+  CaretMessageInfo info;
 
   /* simulate receiving the iobuf over network with some type id */
   ret = cb.dispatchTypedRequest(headerInfo2, requestBuf2);

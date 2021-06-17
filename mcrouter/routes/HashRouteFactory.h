@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <folly/dynamic.h>
@@ -17,11 +15,15 @@
 #include "mcrouter/lib/RendezvousHashFunc.h"
 #include "mcrouter/lib/SelectionRouteFactory.h"
 #include "mcrouter/lib/WeightedCh3HashFunc.h"
+#include "mcrouter/lib/WeightedCh4HashFunc.h"
+#include "mcrouter/lib/WeightedRendezvousHashFunc.h"
 #include "mcrouter/lib/config/RouteHandleFactory.h"
 #include "mcrouter/lib/routes/NullRoute.h"
 #include "mcrouter/lib/routes/SelectionRoute.h"
 #include "mcrouter/routes/LatestRoute.h"
+#include "mcrouter/routes/LoadBalancerRoute.h"
 #include "mcrouter/routes/McRouteHandleBuilder.h"
+#include "mcrouter/routes/RendezvousRouteHelpers.h"
 #include "mcrouter/routes/ShardHashFunc.h"
 
 namespace facebook {
@@ -79,30 +81,32 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> createHashRoute(
     WeightedCh3HashFunc func{json, n};
     return createHashRoute<RouterInfo, WeightedCh3HashFunc>(
         std::move(rh), std::move(salt), std::move(func));
+  } else if (funcType == WeightedCh4HashFunc::type()) {
+    WeightedCh4HashFunc func{json, n};
+    return createHashRoute<RouterInfo, WeightedCh4HashFunc>(
+        std::move(rh), std::move(salt), std::move(func));
   } else if (funcType == ConstShardHashFunc::type()) {
     return createHashRoute<RouterInfo, ConstShardHashFunc>(
         std::move(rh), std::move(salt), ConstShardHashFunc(n));
-  } else if (funcType == RendezvousHashFunc::type()) {
-    std::vector<folly::StringPiece> endpoints;
-
-    auto jtags = json.get_ptr("tags");
-    checkLogic(jtags, "HashRoute: tags needed for Rendezvous hash route");
-    checkLogic(jtags->isArray(), "HashRoute: tags is not an array");
-    checkLogic(
-        jtags->size() == rh.size(),
-        "HashRoute: number of tags doesn't match number of route handles");
-
-    for (const auto& jtag : *jtags) {
-      checkLogic(jtag.isString(), "HashRoute: tag is not a string");
-      endpoints.push_back(jtag.stringPiece());
+  } else if (
+      funcType == RendezvousHashFunc::type() ||
+      funcType == WeightedRendezvousHashFunc::type()) {
+    auto endpoints = getTags(json, rh.size(), "HashRoute");
+    if (funcType == RendezvousHashFunc::type()) {
+      return createHashRoute<RouterInfo, RendezvousHashFunc>(
+          std::move(rh),
+          std::move(salt),
+          RendezvousHashFunc(std::move(endpoints), json));
+    } else {
+      return createHashRoute<RouterInfo, WeightedRendezvousHashFunc>(
+          std::move(rh),
+          std::move(salt),
+          WeightedRendezvousHashFunc(std::move(endpoints), json));
     }
-
-    return createHashRoute<RouterInfo, RendezvousHashFunc>(
-        std::move(rh),
-        std::move(salt),
-        RendezvousHashFunc(std::move(endpoints)));
   } else if (funcType == "Latest") {
     return createLatestRoute<RouterInfo>(json, std::move(rh), threadId);
+  } else if (funcType == "LoadBalancer") {
+    return createLoadBalancerRoute<RouterInfo>(json, std::move(rh));
   }
   throwLogic("Unknown hash function: {}", funcType);
 }
@@ -123,6 +127,6 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> makeHashRoute(
       json, std::move(children), factory.getThreadId());
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

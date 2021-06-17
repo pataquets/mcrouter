@@ -1,19 +1,16 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "LogFailure.h"
 
 #include <unistd.h>
 
 #include <chrono>
 #include <map>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +20,7 @@
 
 #include <folly/Format.h>
 #include <folly/Singleton.h>
+#include <folly/Synchronized.h>
 
 #include "mcrouter/lib/fbi/cpp/util.h"
 
@@ -103,8 +101,6 @@ void throwErrorImpl(
 }
 
 struct StaticContainer {
-  std::mutex lock;
-
   // service name => contex
   std::map<std::string, std::string> contexts;
 
@@ -113,7 +109,7 @@ struct StaticContainer {
       handlers::verboseLogToStdError()};
 };
 
-folly::Singleton<StaticContainer> containerSingleton;
+folly::Singleton<folly::Synchronized<StaticContainer>> containerSingleton;
 
 } // anonymous namespace
 
@@ -134,11 +130,12 @@ std::pair<std::string, HandlerFunc> throwLogicError() {
       "throwLogicError", &throwErrorImpl<std::logic_error>);
 }
 
-} // handlers
+} // namespace handlers
 
 const char* const Category::kBadEnvironment = "bad-environment";
 const char* const Category::kInvalidOption = "invalid-option";
 const char* const Category::kInvalidConfig = "invalid-config";
+const char* const Category::kInvalidDynamicSampler = "invalid-dynamic-sampler";
 const char* const Category::kOutOfResources = "out-of-resources";
 const char* const Category::kBrokenLogic = "broken-logic";
 const char* const Category::kSystemError = "system-error";
@@ -146,51 +143,55 @@ const char* const Category::kOther = "other";
 
 bool addHandler(std::pair<std::string, HandlerFunc> handler) {
   if (auto container = containerSingleton.try_get()) {
-    std::lock_guard<std::mutex> lock(container->lock);
-    for (const auto& it : container->handlers) {
-      if (it.first == handler.first) {
-        return false;
+    return container->withWLock([&](auto& c) {
+      for (const auto& it : c.handlers) {
+        if (it.first == handler.first) {
+          return false;
+        }
       }
-    }
-    container->handlers.push_back(std::move(handler));
-    return true;
+      c.handlers.push_back(std::move(handler));
+      return true;
+    });
   }
   return false;
 }
 
 bool setHandler(std::pair<std::string, HandlerFunc> handler) {
   if (auto container = containerSingleton.try_get()) {
-    std::lock_guard<std::mutex> lock(container->lock);
-    for (auto& it : container->handlers) {
-      if (it.first == handler.first) {
-        it.second = std::move(handler.second);
-        return true;
+    return container->withWLock([&](auto& c) {
+      for (auto& it : c.handlers) {
+        if (it.first == handler.first) {
+          it.second = std::move(handler.second);
+          return true;
+        }
       }
-    }
-    container->handlers.push_back(std::move(handler));
-    return true;
+      c.handlers.push_back(std::move(handler));
+      return true;
+    });
   }
   return false;
 }
 
 bool removeHandler(folly::StringPiece handlerName) {
   if (auto container = containerSingleton.try_get()) {
-    std::lock_guard<std::mutex> lock(container->lock);
-    auto& handlers = container->handlers;
-    for (auto it = handlers.begin(); it != handlers.end(); ++it) {
-      if (it->first == handlerName) {
-        handlers.erase(it);
-        return true;
+    return container->withWLock([&](auto& c) {
+      auto& handlers = c.handlers;
+      for (auto it = handlers.begin(); it != handlers.end(); ++it) {
+        if (it->first == handlerName) {
+          handlers.erase(it);
+          return true;
+        }
       }
-    }
+      return false;
+    });
   }
   return false;
 }
 
 void setServiceContext(folly::StringPiece service, std::string context) {
   if (auto container = containerSingleton.try_get()) {
-    std::lock_guard<std::mutex> lock(container->lock);
-    container->contexts[service.str()] = std::move(context);
+    container->withWLock(
+        [&](auto& c) { c.contexts[service.str()] = std::move(context); });
   }
 }
 
@@ -205,16 +206,17 @@ void log(
   std::map<std::string, std::string> contexts;
   std::vector<std::pair<std::string, HandlerFunc>> handlers;
   if (auto container = containerSingleton.try_get()) {
-    std::lock_guard<std::mutex> lock(container->lock);
-    contexts = container->contexts;
-    handlers = container->handlers;
+    container->withRLock([&](const auto& c) {
+      contexts = c.contexts;
+      handlers = c.handlers;
+    });
   }
   for (auto& handler : handlers) {
     handler.second(file, line, service, category, msg, contexts);
   }
 }
 
-} // detail
-}
-}
-} // facebook::memcache::failure
+} // namespace detail
+} // namespace failure
+} // namespace memcache
+} // namespace facebook

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2016, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -16,7 +14,8 @@ namespace memcache {
 
 template <
     class RouteHandleIf,
-    template <typename... Ignored> class R,
+    template <typename... Ignored>
+    class R,
     typename... RArgs,
     typename... Args>
 std::shared_ptr<RouteHandleIf> makeRouteHandle(Args&&... args) {
@@ -27,7 +26,8 @@ std::shared_ptr<RouteHandleIf> makeRouteHandle(Args&&... args) {
 
 template <
     class RouterInfo,
-    template <typename... Ignored> class R,
+    template <typename... Ignored>
+    class R,
     typename... RArgs,
     typename... Args>
 std::shared_ptr<typename RouterInfo::RouteHandleIf> makeRouteHandleWithInfo(
@@ -36,5 +36,5 @@ std::shared_ptr<typename RouterInfo::RouteHandleIf> makeRouteHandleWithInfo(
       R<RouterInfo, RArgs...>>>(std::forward<Args>(args)...);
 }
 
-} // memcache
-} // facebook
+} // namespace memcache
+} // namespace facebook

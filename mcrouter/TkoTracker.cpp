@@ -1,33 +1,57 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "TkoTracker.h"
 
 #include <cassert>
 #include <functional>
+#include <unordered_map>
 
 #include <folly/MapUtil.h>
 
-#include "mcrouter/ProxyDestination.h"
+#include "mcrouter/ProxyDestinationBase.h"
 #include "mcrouter/TkoCounters.h"
+#include "mcrouter/lib/network/AccessPoint.h"
 
 namespace facebook {
 namespace memcache {
 namespace mcrouter {
 
-TkoTracker::TkoTracker(
-    size_t tkoThreshold,
-    size_t maxSoftTkos,
-    TkoTrackerMap& trackerMap)
-    : tkoThreshold_(tkoThreshold),
-      maxSoftTkos_(maxSoftTkos),
-      trackerMap_(trackerMap) {}
+std::pair<bool, bool> PoolTkoTracker::incNumDestinationsSoftTko() {
+  if (failOpen_) {
+    return {failOpen_, false};
+  }
+  auto& curVal = numDestinationsSoftTko_;
+  size_t oldVal = curVal;
+  bool stateChanged = false;
+  do {
+    if (oldVal == failOpenEnterNumSoftTkos_) {
+      failOpen_ = true;
+      stateChanged = true;
+      break;
+    }
+  } while (!numDestinationsSoftTko_.compare_exchange_weak(oldVal, oldVal + 1));
+  return {failOpen_, stateChanged};
+}
+
+bool PoolTkoTracker::decNumDestinationsSoftTko() {
+  auto& curVal = numDestinationsSoftTko_;
+  size_t oldVal = curVal;
+  do {
+    if (failOpen_ && oldVal == failOpenExitNumSoftTkos_) {
+      failOpen_ = false;
+      return true;
+    }
+  } while (!numDestinationsSoftTko_.compare_exchange_weak(oldVal, oldVal - 1));
+  return false;
+}
+
+TkoTracker::TkoTracker(size_t tkoThreshold, TkoTrackerMap& trackerMap)
+    : tkoThreshold_(tkoThreshold), trackerMap_(trackerMap) {}
 
 bool TkoTracker::isHardTko() const {
   uintptr_t curSumFailures = sumFailures_;
@@ -43,23 +67,34 @@ const TkoCounters& TkoTracker::globalTkos() const {
   return trackerMap_.globalTkos_;
 }
 
-bool TkoTracker::incrementSoftTkoCount() {
-  auto& softTkos = trackerMap_.globalTkos_.softTkos;
-  size_t old_soft_tkos = softTkos;
-  do {
-    assert(old_soft_tkos <= maxSoftTkos_);
-    if (old_soft_tkos == maxSoftTkos_) {
-      /* We've hit the soft TKO limit and can't tko this box. */
+bool TkoTracker::incrementSoftTkoCount(ProxyDestinationBase* pdstn) {
+  if (poolTracker_) {
+    auto result = poolTracker_->incNumDestinationsSoftTko();
+    if (result.first) {
+      if (result.second) {
+        pdstn->updateSoftTkoStats(GlobalSoftTkoUpdateType::ENTER_FAIL_OPEN);
+      }
       return false;
     }
-  } while (!softTkos.compare_exchange_weak(old_soft_tkos, old_soft_tkos + 1));
+  }
+  trackerMap_.globalTkos_.softTkos++;
+  if (poolTracker_) {
+    pdstn->updateSoftTkoStats(GlobalSoftTkoUpdateType::INC_SOFT_TKOS);
+  }
   return true;
 }
 
-void TkoTracker::decrementSoftTkoCount() {
+void TkoTracker::decrementSoftTkoCount(ProxyDestinationBase* pdstn) {
   // Decrement the counter and ensure we haven't gone below 0
-  size_t old_soft_tkos = trackerMap_.globalTkos_.softTkos.fetch_sub(1);
-  assert(old_soft_tkos != 0);
+  size_t oldSoftTkos = trackerMap_.globalTkos_.softTkos.fetch_sub(1);
+  (void)oldSoftTkos;
+  assert(oldSoftTkos != 0);
+  if (poolTracker_) {
+    if (poolTracker_->decNumDestinationsSoftTko()) {
+      pdstn->updateSoftTkoStats(GlobalSoftTkoUpdateType::EXIT_FAIL_OPEN);
+    }
+    pdstn->updateSoftTkoStats(GlobalSoftTkoUpdateType::DEC_SOFT_TKOS);
+  }
 }
 
 bool TkoTracker::setSumFailures(uintptr_t value) {
@@ -74,16 +109,17 @@ bool TkoTracker::setSumFailures(uintptr_t value) {
   return true;
 }
 
-bool TkoTracker::recordSoftFailure(ProxyDestination* pdstn) {
+bool TkoTracker::recordSoftFailure(
+    ProxyDestinationBase* pdstn,
+    carbon::Result result) {
+  // We increment soft tko count first before actually taking responsibility
+  // for the TKO. This means we run the risk that multiple proxies
+  // increment the count for the same destination, causing us to be overly
+  // conservative. Eventually this will get corrected, as only one proxy can
+  // ever mark it TKO, but we may be inconsistent for a very short time.
   ++consecutiveFailureCount_;
 
-  /* We increment soft tko count first before actually taking responsibility
-     for the TKO. This means we run the risk that multiple proxies
-     increment the count for the same destination, causing us to be overly
-     conservative. Eventually this will get corrected, as only one proxy can
-     ever mark it TKO, but we may be inconsistent for a very short time.
-  */
-  /* If host is in any state of TKO, we just leave it alone */
+  // If host is in any state of TKO, we just leave it alone
   if (isTko()) {
     return false;
   }
@@ -92,22 +128,23 @@ bool TkoTracker::recordSoftFailure(ProxyDestination* pdstn) {
   uintptr_t value = 0;
   uintptr_t pdstnAddr = reinterpret_cast<uintptr_t>(pdstn);
   do {
-    /* If we're one failure below the limit, we're about to enter softTKO */
+    // If we're one failure below the limit, we're about to enter softTKO
     if (curSumFailures == tkoThreshold_ - 1) {
-      /* If we're not allowed to TKO the box, leave it one hit away
-         Note, we need to check value to ensure we didn't already increment the
-         counter in a previous iteration */
-      if (value != pdstnAddr && !incrementSoftTkoCount()) {
+      // Note: we need to check value to ensure we didn't already increment
+      // the counter in a previous iteration
+      // If the fail-open state has entered, exit without making the
+      // pdstn as soft tko
+      if (value != pdstnAddr && !incrementSoftTkoCount(pdstn)) {
         return false;
       }
       value = pdstnAddr;
     } else {
       if (value == pdstnAddr) {
-        /* a previous loop iteration attempted to soft TKO the box,
-         so we need to undo that */
-        decrementSoftTkoCount();
+        // a previous loop iteration attempted to soft TKO the box,
+        // so we need to undo that
+        decrementSoftTkoCount(pdstn);
       }
-      /* Someone else is responsible, so quit */
+      // Someone else is responsible, so quit
       if (curSumFailures > tkoThreshold_) {
         return false;
       } else {
@@ -115,24 +152,31 @@ bool TkoTracker::recordSoftFailure(ProxyDestination* pdstn) {
       }
     }
   } while (!sumFailures_.compare_exchange_weak(curSumFailures, value));
-  return value == pdstnAddr;
+
+  if (value == pdstnAddr) {
+    tkoReason_.store(result, std::memory_order_relaxed);
+    return true;
+  }
+  return false;
 }
 
-bool TkoTracker::recordHardFailure(ProxyDestination* pdstn) {
+bool TkoTracker::recordHardFailure(
+    ProxyDestinationBase* pdstn,
+    carbon::Result result) {
   ++consecutiveFailureCount_;
 
   if (isHardTko()) {
     return false;
   }
-  /* If we were already TKO and responsible, but not hard TKO, it means we were
-     in soft TKO before. We need decrement the counter and convert to hard
-     TKO */
+  // If we were already TKO and responsible, but not hard TKO, it means we were
+  // in soft TKO before. We need decrement the counter and convert to hard
+  // TKO
   if (isResponsible(pdstn)) {
-    /* convert to hard failure */
+    // convert to hard failure
     sumFailures_ |= 1;
-    decrementSoftTkoCount();
+    decrementSoftTkoCount(pdstn);
     ++trackerMap_.globalTkos_.hardTkos;
-    /* We've already been marked responsible */
+    // We've already been marked responsible
     return false;
   }
 
@@ -140,44 +184,47 @@ bool TkoTracker::recordHardFailure(ProxyDestination* pdstn) {
   bool success = setSumFailures(reinterpret_cast<uintptr_t>(pdstn) | 1);
   if (success) {
     ++trackerMap_.globalTkos_.hardTkos;
+    tkoReason_.store(result, std::memory_order_relaxed);
   }
   return success;
 }
 
-bool TkoTracker::isResponsible(ProxyDestination* pdstn) const {
+bool TkoTracker::isResponsible(ProxyDestinationBase* pdstn) const {
   return (sumFailures_ & ~1) == reinterpret_cast<uintptr_t>(pdstn);
 }
 
-bool TkoTracker::recordSuccess(ProxyDestination* pdstn) {
-  /* If we're responsible, no one else can change any state and we're
-     effectively under mutex. */
+bool TkoTracker::recordSuccess(ProxyDestinationBase* pdstn) {
+  // If we're responsible, no one else can change any state and we're
+  // effectively under mutex.
   if (isResponsible(pdstn)) {
-    /* Coming out of TKO, we need to decrement counters */
+    // Coming out of TKO, we need to decrement counters
     if (isSoftTko()) {
-      decrementSoftTkoCount();
+      decrementSoftTkoCount(pdstn);
     }
     if (isHardTko()) {
       --trackerMap_.globalTkos_.hardTkos;
     }
     sumFailures_ = 0;
     consecutiveFailureCount_ = 0;
+    tkoReason_.store(carbon::Result::UNKNOWN, std::memory_order_relaxed);
     return true;
   }
-  /* Skip resetting failures if the counter is at zero.
-     If an error races here and increments the counter,
-     we can pretend this success happened before the error,
-     and the state is consistent.
 
-     If we don't skip here we end up doing CAS on a shared state
-     every single request. */
+  // Skip resetting failures if the counter is at zero.
+  // If an error races here and increments the counter,
+  // we can pretend this success happened before the error,
+  // and the state is consistent.
+
+  // If we don't skip here we end up doing CAS on a shared state
+  // every single request.
   if (sumFailures_ != 0 && setSumFailures(0)) {
     consecutiveFailureCount_ = 0;
   }
   return false;
 }
 
-bool TkoTracker::removeDestination(ProxyDestination* pdstn) {
-  // we should clear the TKO state if pdstn is responsible
+bool TkoTracker::removeDestination(ProxyDestinationBase* pdstn) {
+  // We should clear the TKO state if pdstn is responsible
   if (isResponsible(pdstn)) {
     return recordSuccess(pdstn);
   }
@@ -188,10 +235,29 @@ TkoTracker::~TkoTracker() {
   trackerMap_.removeTracker(key_);
 }
 
+std::shared_ptr<PoolTkoTracker> TkoTrackerMap::createPoolTkoTracker(
+    std::string poolName,
+    uint32_t numEnterSoftTkos,
+    uint32_t numExitSoftTkos) {
+  std::shared_ptr<PoolTkoTracker> poolTracker;
+
+  std::lock_guard<std::mutex> lock(mx_);
+  auto it = poolTrackers_.find(poolName);
+  if (it == poolTrackers_.end() ||
+      (poolTracker = it->second.lock()) == nullptr) {
+    poolTracker.reset(new PoolTkoTracker(numEnterSoftTkos, numExitSoftTkos));
+    auto trackerIt = poolTrackers_.emplace(poolName, poolTracker);
+    if (!trackerIt.second) {
+      trackerIt.first->second = poolTracker;
+    }
+  }
+  return poolTracker;
+}
+
 void TkoTrackerMap::updateTracker(
-    ProxyDestination& pdstn,
+    ProxyDestinationBase& pdstn,
     const size_t tkoThreshold,
-    const size_t maxSoftTkos) {
+    const std::shared_ptr<PoolTkoTracker>& poolTkoTracker) {
   auto key = pdstn.accessPoint()->toHostPortString();
 
   // This shared pointer has to be destroyed after releasing "mx_".
@@ -203,7 +269,7 @@ void TkoTrackerMap::updateTracker(
     std::lock_guard<std::mutex> lock(mx_);
     auto it = trackers_.find(key);
     if (it == trackers_.end() || (tracker = it->second.lock()) == nullptr) {
-      tracker.reset(new TkoTracker(tkoThreshold, maxSoftTkos, *this));
+      tracker.reset(new TkoTracker(tkoThreshold, *this));
       auto trackerIt = trackers_.emplace(key, tracker);
       if (!trackerIt.second) {
         trackerIt.first->second = tracker;
@@ -211,7 +277,10 @@ void TkoTrackerMap::updateTracker(
       tracker->key_ = trackerIt.first->first;
     }
   }
-  pdstn.tracker = std::move(tracker);
+  if (poolTkoTracker) {
+    tracker->setPoolTracker(poolTkoTracker);
+  }
+  pdstn.setTracker(std::move(tracker));
 }
 
 std::unordered_map<std::string, std::pair<bool, size_t>>
@@ -250,7 +319,13 @@ void TkoTrackerMap::foreachTkoTracker(
   //  - We would try to lock "mx_" again from the same thread (which is UB).
   //  - We would change "trackers_" while iterating over it.
   std::vector<std::shared_ptr<TkoTracker>> lockedTrackers;
-  lockedTrackers.reserve(trackers_.size());
+  // Preallocate lockedTrackers
+  decltype(lockedTrackers)::size_type trackersCount;
+  {
+    std::lock_guard<std::mutex> lock(mx_);
+    trackersCount = trackers_.size();
+  }
+  lockedTrackers.reserve(trackersCount);
 
   {
     std::lock_guard<std::mutex> lock(mx_);
@@ -271,6 +346,6 @@ void TkoTrackerMap::removeTracker(folly::StringPiece key) noexcept {
   }
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

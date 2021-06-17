@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -43,14 +41,12 @@ class HelloGoodbyeRouteHandleIf {
   virtual GoodbyeReply route(const GoodbyeRequest&) = 0;
   virtual HelloReply route(const HelloRequest&) = 0;
 
-  virtual void traverse(
-      const GoodbyeRequest&,
-      const facebook::memcache::RouteHandleTraverser<
-          HelloGoodbyeRouteHandleIf>&) const = 0;
-  virtual void traverse(
-      const HelloRequest&,
-      const facebook::memcache::RouteHandleTraverser<
-          HelloGoodbyeRouteHandleIf>&) const = 0;
+virtual bool traverse(
+    const GoodbyeRequest&,
+    const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>&) const = 0;
+virtual bool traverse(
+    const HelloRequest&,
+    const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>&) const = 0;
 };
 
 template <class Route>
@@ -70,21 +66,20 @@ class HelloGoodbyeRouteHandle : public HelloGoodbyeRouteHandleIf {
     return route_.route(request);
   }
 
-  void traverse(
-      const GoodbyeRequest& request,
-      const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
-  void traverse(
-      const HelloRequest& request,
-      const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>&
-          traverser) const override final {
-    route_.traverse(request, traverser);
-  }
+bool traverse(
+    const GoodbyeRequest& request,
+    const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
+bool traverse(
+    const HelloRequest& request,
+    const facebook::memcache::RouteHandleTraverser<HelloGoodbyeRouteHandleIf>& traverser)
+    const override final {
+  return route_.traverse(request, traverser);
+}
 
  private:
   Route route_;
 };
-
 } // namespace hellogoodbye

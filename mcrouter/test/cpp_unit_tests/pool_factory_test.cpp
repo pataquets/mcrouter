@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -28,6 +26,10 @@ class MockConfigApi : public ConfigApiIf {
 
   explicit MockConfigApi(folly::StringKeyedUnorderedMap<std::string> pools)
       : pools_(std::move(pools)) {}
+
+  bool partialReconfigurableSource(const std::string&, std::string&) override {
+    return false;
+  }
 
   bool get(ConfigType type, const std::string& path, std::string& contents)
       final {
@@ -58,7 +60,7 @@ class MockConfigApi : public ConfigApiIf {
   size_t getCalls_{0};
 };
 
-} // anonymous
+} // namespace
 
 TEST(PoolFactory, inherit_loop) {
   MockConfigApi api;
@@ -76,7 +78,8 @@ TEST(PoolFactory, inherit_loop) {
       }
     }
   })"),
-      api);
+      api,
+      folly::json::metadata_map{});
   try {
     factory.parsePool("A");
   } catch (const std::logic_error& e) {
@@ -106,7 +109,8 @@ TEST(PoolFactory, inherit_cache) {
       }
     }
   })"),
-      api);
+      api,
+      folly::json::metadata_map{});
   auto poolA = factory.parsePool("A");
   EXPECT_EQ("A", poolA.name.str());
   EXPECT_EQ(5, poolA.json["server_timeout"].getInt());

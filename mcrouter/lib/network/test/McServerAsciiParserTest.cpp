@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <gtest/gtest.h>
 
 #include "mcrouter/lib/network/ServerMcParser.h"
@@ -16,9 +14,9 @@ using namespace facebook::memcache;
 
 namespace facebook {
 namespace memcache {
-struct UmbrellaMessageInfo;
+struct CaretMessageInfo;
 }
-}
+} // namespace facebook
 
 struct DummyMultiOpEnd {};
 
@@ -45,9 +43,8 @@ class TestRunner {
 
   template <class Request>
   TestRunner& expectNext(Request req, bool noreply = false) {
-    callbacks_.emplace_back(
-        std::make_unique<ExpectedRequestCallback<Request>>(
-            std::move(req), noreply));
+    callbacks_.emplace_back(std::make_unique<ExpectedRequestCallback<Request>>(
+        std::move(req), noreply));
     return *this;
   }
 
@@ -179,16 +176,11 @@ class TestRunner {
     bool failed_{false};
 
     // ServerMcParser callbacks.
-    void caretRequestReady(const UmbrellaMessageInfo&, const folly::IOBuf&) {
+    void caretRequestReady(const CaretMessageInfo&, const folly::IOBuf&) {
       FAIL() << "caretRequestReady should never be called for ASCII";
     }
 
-    template <class Request>
-    void umbrellaRequestReady(Request&&, uint64_t) {
-      FAIL() << "umbrellaRequestReady should never be called for ASCII";
-    }
-
-    void parseError(mc_res_t, folly::StringPiece reason) {
+    void parseError(carbon::Result, folly::StringPiece reason) {
       ASSERT_NE(nullptr, parser_)
           << "Test framework bug, didn't provide parser to callback!";
       EXPECT_TRUE(isError_) << "Unexpected parsing error: " << reason
@@ -293,17 +285,17 @@ Request createUpdateLike(
     int32_t exptime) {
   // Test regular request
   Request r(key);
-  r.value() =
+  r.value_ref() =
       folly::IOBuf(folly::IOBuf::COPY_BUFFER, value.begin(), value.size());
-  r.flags() = flags;
-  r.exptime() = exptime;
+  r.flags_ref() = flags;
+  r.exptime_ref() = exptime;
   return r;
 }
 
 template <class Request>
 Request createArithmeticLike(folly::StringPiece key, double delta) {
   Request r(key);
-  r.delta() = delta;
+  r.delta_ref() = delta;
   return r;
 }
 
@@ -485,7 +477,7 @@ void arithmeticTest(std::string opCmd) {
       .run(opCmd + " test:stepan:1   noreply \r\n");
 }
 
-} // anonymous
+} // namespace
 
 TEST(McServerAsciiParserHarness, get) {
   getLikeTest<McGetRequest>("get");
@@ -537,6 +529,15 @@ TEST(McServerAsciiParserHarness, version) {
       .run("version    \r\n");
 }
 
+TEST(McServerAsciiParserHarness, quitWithVersion) {
+  TestRunner()
+      .expectNext(McQuitRequest(), true)
+      .expectNext(McVersionRequest())
+      .run(
+          "quit\r\n"
+          "version\r\n");
+}
+
 TEST(McServerAsciiParserHarness, shutdown) {
   TestRunner()
       .expectNext(McShutdownRequest())
@@ -569,13 +570,13 @@ TEST(McServerAsciiParserHarness, delete) {
       .run("delete  test:stepan:1  noreply   \r\n");
 
   McDeleteRequest r("test:stepan:1");
-  r.exptime() = -10;
+  r.exptime_ref() = -10;
   TestRunner()
       .expectNext(r)
       .run("delete test:stepan:1 -10\r\n")
       .run("delete  test:stepan:1  -10  \r\n");
 
-  r.exptime() = 1234123;
+  r.exptime_ref() = 1234123;
   TestRunner()
       .expectNext(r)
       .run("delete test:stepan:1 1234123\r\n")
@@ -588,7 +589,7 @@ TEST(McServerAsciiParserHarness, delete) {
 
 TEST(McServerAsciiParserHarness, touch) {
   McTouchRequest r("test:key:1");
-  r.exptime() = -10;
+  r.exptime_ref() = -10;
   TestRunner()
       .expectNext(r)
       .run("touch test:key:1 -10\r\n")
@@ -598,7 +599,7 @@ TEST(McServerAsciiParserHarness, touch) {
       .run("touch test:key:1 -10 noreply\r\n")
       .run("touch  test:key:1  -10  noreply   \r\n");
 
-  r.exptime() = 1234567;
+  r.exptime_ref() = 1234567;
   TestRunner()
       .expectNext(r)
       .run("touch test:key:1 1234567\r\n")
@@ -624,7 +625,7 @@ TEST(McServerAsciiParserHarness, flush_all) {
       .run("flush_all     \r\n");
 
   McFlushAllRequest r;
-  r.delay() = 123456789;
+  r.delay_ref() = 123456789;
   TestRunner()
       .expectNext(std::move(r))
       .run("flush_all 123456789\r\n")
@@ -646,7 +647,7 @@ TEST(McServerAsciiParserHarness, flush_regex) {
 TEST(McServerAsciiParserHarness, lease_set) {
   auto r =
       createUpdateLike<McLeaseSetRequest>("test:stepan:1", kTestValue, 1, 65);
-  r.leaseToken() = 123;
+  r.leaseToken_ref() = 123;
 
   TestRunner()
       .expectNext(r)
@@ -667,7 +668,7 @@ TEST(McServerAsciiParserHarness, lease_set) {
 
 TEST(McServerAsciiParserHarness, cas) {
   auto r = createUpdateLike<McCasRequest>("test:stepan:1", kTestValue, 1, 65);
-  r.casToken() = 123;
+  r.casToken_ref() = 123;
 
   TestRunner()
       .expectNext(r)
@@ -689,14 +690,14 @@ TEST(McServerAsciiParserHarness, cas) {
 TEST(McServerAsciiParserHarness, allOps) {
   auto casRequest =
       createUpdateLike<McCasRequest>("test:stepan:11", "Facebook", 765, -1);
-  casRequest.casToken() = 893;
+  casRequest.casToken_ref() = 893;
 
   auto leaseSetRequest =
       createUpdateLike<McLeaseSetRequest>("test:stepan:12", "hAcK", 294, 563);
-  leaseSetRequest.leaseToken() = 846;
+  leaseSetRequest.leaseToken_ref() = 846;
 
   McDeleteRequest deleteRequest("test:stepan:13");
-  deleteRequest.exptime() = 2345234;
+  deleteRequest.exptime_ref() = 2345234;
 
   TestRunner()
       .expectNext(McGetRequest("test:stepan:1"))

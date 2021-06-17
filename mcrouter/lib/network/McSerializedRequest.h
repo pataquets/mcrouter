@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -14,7 +12,6 @@
 #include "mcrouter/lib/mc/protocol.h"
 #include "mcrouter/lib/network/AsciiSerialized.h"
 #include "mcrouter/lib/network/CaretSerializedMessage.h"
-#include "mcrouter/lib/network/UmbrellaProtocol.h"
 
 namespace facebook {
 namespace memcache {
@@ -58,19 +55,22 @@ class McSerializedRequest {
   size_t getIovsCount() const {
     return iovsCount_;
   }
+
   const struct iovec* getIovs() const {
     return iovsBegin_;
   }
+
   uint32_t typeId() const {
     return typeId_;
   }
+
+  size_t getBodySize();
 
  private:
   static const size_t kMaxIovs = 20;
 
   union {
     AsciiSerializedRequest asciiRequest_;
-    UmbrellaSerializedMessage umbrellaMessage_;
     CaretSerializedMessage caretRequest_;
   };
 
@@ -80,7 +80,7 @@ class McSerializedRequest {
   Result result_{Result::OK};
   uint32_t typeId_{0};
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook
 
 #include "McSerializedRequest-inl.h"

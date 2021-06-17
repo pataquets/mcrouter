@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -23,7 +21,6 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <mcrouter/lib/carbon/CarbonProtocolReader.h>
-#include <mcrouter/lib/carbon/CarbonProtocolWriter.h>
 #include <mcrouter/lib/carbon/CommonSerializationTraits.h>
 #include <mcrouter/lib/carbon/Keys.h>
 #include <mcrouter/lib/carbon/ReplyCommon.h>
@@ -33,19 +30,22 @@
 #include <mcrouter/lib/carbon/TypeList.h>
 #include <mcrouter/lib/carbon/Variant.h>
 
+#include "mcrouter/lib/carbon/example/gen/gen-cpp2/HelloGoodbye_types.h"
+
 #include "mcrouter/lib/network/gen/CommonMessages.h"
 
 namespace hellogoodbye {
 
+using EnumUInt32 = hellogoodbye::thrift::EnumUInt32;
+
+std::string enumEnumUInt32ToString(EnumUInt32 val);
+
 class HelloReply;
 
-class HelloRequest : public carbon::RequestCommon {
+class HelloRequest : public carbon::RequestCommon, public hellogoodbye::thrift::HelloRequest {
  public:
   using reply_type = HelloReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 65;
   static constexpr const char* name = "hello";
 
@@ -54,49 +54,20 @@ class HelloRequest : public carbon::RequestCommon {
   HelloRequest& operator=(const HelloRequest&) = default;
   HelloRequest(HelloRequest&&) = default;
   HelloRequest& operator=(HelloRequest&&) = default;
-  explicit HelloRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit HelloRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit HelloRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t shardId() const {
-    return shardId_;
-  }
-  uint64_t& shardId() {
-    return shardId_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit HelloRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<HelloRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
-  uint64_t shardId_{0};
 };
 
-class HelloReply : public carbon::ReplyCommon {
+class HelloReply : public carbon::ReplyCommon, public hellogoodbye::thrift::HelloReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 66;
 
   HelloReply() = default;
@@ -104,43 +75,20 @@ class HelloReply : public carbon::ReplyCommon {
   HelloReply& operator=(const HelloReply&) = default;
   HelloReply(HelloReply&&) = default;
   HelloReply& operator=(HelloReply&&) = default;
-  explicit HelloReply(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit HelloReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<HelloReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Result result_{mc_res_unknown};
 };
 
 class GoodbyeReply;
 
-class GoodbyeRequest : public carbon::RequestCommon {
+class GoodbyeRequest : public carbon::RequestCommon, public hellogoodbye::thrift::GoodbyeRequest {
  public:
   using reply_type = GoodbyeReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 67;
   static constexpr const char* name = "goodbye";
 
@@ -149,49 +97,20 @@ class GoodbyeRequest : public carbon::RequestCommon {
   GoodbyeRequest& operator=(const GoodbyeRequest&) = default;
   GoodbyeRequest(GoodbyeRequest&&) = default;
   GoodbyeRequest& operator=(GoodbyeRequest&&) = default;
-  explicit GoodbyeRequest(folly::StringPiece sp) : key_(sp) {}
-  explicit GoodbyeRequest(folly::IOBuf&& carbonKey)
-      : key_(std::move(carbonKey)) {}
-
-  const carbon::Keys<folly::IOBuf>& key() const {
-    return key_;
+  explicit GoodbyeRequest(folly::StringPiece sp) {
+    key_ref() = sp;
   }
-  carbon::Keys<folly::IOBuf>& key() {
-    return key_;
-  }
-  uint64_t shardId() const {
-    return shardId_;
-  }
-  uint64_t& shardId() {
-    return shardId_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit GoodbyeRequest(folly::IOBuf&& carbonKey) {
+    key_ref() = std::move(carbonKey);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<GoodbyeRequest>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  carbon::Keys<folly::IOBuf> key_;
-  uint64_t shardId_{0};
 };
 
-class GoodbyeReply : public carbon::ReplyCommon {
+class GoodbyeReply : public carbon::ReplyCommon, public hellogoodbye::thrift::GoodbyeReply {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 68;
 
   GoodbyeReply() = default;
@@ -199,41 +118,13 @@ class GoodbyeReply : public carbon::ReplyCommon {
   GoodbyeReply& operator=(const GoodbyeReply&) = default;
   GoodbyeReply(GoodbyeReply&&) = default;
   GoodbyeReply& operator=(GoodbyeReply&&) = default;
-  explicit GoodbyeReply(carbon::Result carbonResult) : result_(carbonResult) {}
-
-  carbon::Result result() const {
-    return result_;
-  }
-  carbon::Result& result() {
-    return result_;
-  }
-  const std::string& message() const {
-    return message_;
-  }
-  std::string& message() {
-    return message_;
-  }
-  uint64_t flags() const {
-    return 0;
-  }
-  int32_t exptime() const {
-    return 0;
+  explicit GoodbyeReply(carbon::Result carbonResult) {
+    result_ref() = carbonResult;
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  friend class apache::thrift::Cpp2Ops<GoodbyeReply>;
 
-  void deserialize(carbon::CarbonProtocolReader& reader);
-
-  template <class V>
-  void visitFields(V&& v);
-  template <class V>
-  void visitFields(V&& v) const;
-
- private:
-  std::string message_;
-  carbon::Result result_{mc_res_unknown};
 };
-
 } // namespace hellogoodbye
 
 #include "HelloGoodbyeMessages-inl.h"

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <stdint.h>
@@ -18,20 +16,22 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <folly/small_vector.h>
+#include <thrift/lib/cpp2/FieldRef.h>
 
 #include "mcrouter/lib/carbon/CarbonProtocolCommon.h"
 #include "mcrouter/lib/carbon/CarbonQueueAppender.h"
+#include "mcrouter/lib/carbon/CommonSerializationTraits.h"
 #include "mcrouter/lib/carbon/Fields.h"
 #include "mcrouter/lib/carbon/Result.h"
-#include "mcrouter/lib/carbon/SerializationTraits.h"
 #include "mcrouter/lib/carbon/Util.h"
 #include "mcrouter/lib/fbi/cpp/util.h"
 
 namespace carbon {
 
-class CarbonProtocolWriter {
+template <class TS>
+class CarbonProtocolWriterImpl {
  public:
-  explicit CarbonProtocolWriter(CarbonQueueAppenderStorage& storage)
+  explicit CarbonProtocolWriterImpl(TS& storage)
       : appender_(&storage, 0 /* unused */) {}
 
   // The writeField() member functions serialize the field header (field type
@@ -217,17 +217,17 @@ class CarbonProtocolWriter {
 
   void writeField(const int16_t id, const Result res) {
     static_assert(
-        sizeof(Result) == sizeof(mc_res_t),
-        "Carbon currently assumes sizeof(Result) == sizeof(mc_res_t)");
-    // Note that this actually narrows mc_res_t from int to int16_t
+        sizeof(Result) == sizeof(carbon::Result),
+        "Carbon currently assumes sizeof(Result) == sizeof(carbon::Result)");
+    // Note that this actually narrows carbon::Result from int to int16_t
     writeField(id, static_cast<int16_t>(res));
   }
 
   void writeFieldAlways(const int16_t id, const Result res) {
     static_assert(
-        sizeof(Result) == sizeof(mc_res_t),
-        "Carbon currently assumes sizeof(Result) == sizeof(mc_res_t)");
-    // Note that this actually narrows mc_res_t from int to int16_t
+        sizeof(Result) == sizeof(carbon::Result),
+        "Carbon currently assumes sizeof(Result) == sizeof(carbon::Result)");
+    // Note that this actually narrows carbon::Result from int to int16_t
     writeFieldAlways(id, static_cast<int16_t>(res));
   }
 
@@ -268,6 +268,39 @@ class CarbonProtocolWriter {
     if (data.hasValue()) {
       writeFieldAlways(id, *data);
     }
+  }
+
+  template <class T>
+  void writeField(
+      const int16_t id,
+      const apache::thrift::optional_field_ref<T> data) {
+    if (data.has_value()) {
+      writeFieldHeader(detail::TypeToField<std::decay_t<T>>::fieldType, id);
+      writeRaw(*data);
+    }
+  }
+
+  void writeField(
+      const int16_t id,
+      const apache::thrift::optional_field_ref<const bool&> data) {
+    if (data.has_value()) {
+      writeFieldAlways(id, *data);
+    }
+  }
+
+  void writeField(
+      const int16_t id,
+      const apache::thrift::optional_field_ref<bool&> data) {
+    if (data.has_value()) {
+      writeFieldAlways(id, *data);
+    }
+  }
+
+  template <class T>
+  void writeField(
+      const int16_t id,
+      const apache::thrift::field_ref<const T&> data) {
+    writeField(id, *data);
   }
 
   // Serialize user-provided types that have suitable specializations of
@@ -317,7 +350,7 @@ class CarbonProtocolWriter {
     nestedStructFieldIds_.pop_back();
   }
 
-  void writeStop() {
+  void writeFieldStop() {
     writeByte(FieldType::Stop);
   }
 
@@ -361,6 +394,14 @@ class CarbonProtocolWriter {
     SerializationTraits<folly::Optional<T>>::write(data, *this);
   }
 
+  template <class T>
+  void writeRaw(const apache::thrift::optional_field_ref<T> data) {
+    writeStructBegin();
+    writeField(1 /* field id */, data);
+    writeFieldStop();
+    writeStructEnd();
+  }
+
   void writeRaw(const std::string& s) {
     const size_t len = s.size();
     facebook::memcache::checkRuntime(
@@ -379,6 +420,14 @@ class CarbonProtocolWriter {
         len);
     writeVarint(static_cast<uint32_t>(len));
     appender_.insert(buf);
+  }
+
+  void writeBinaryFieldLength(const uint32_t length) {
+    writeVarint(length);
+  }
+
+  void writeFixedSize(const folly::ByteRange& range) {
+    appender_.push(range.data(), range.size());
   }
 
   void writeRaw(const bool b) {
@@ -484,6 +533,7 @@ class CarbonProtocolWriter {
   template <class T>
   void doWriteVarint(T val) {
     constexpr uint8_t kMaxIters = (sizeof(T) * 8 + 6) / 7;
+    uint8_t buf[kMaxIters + 1];
 
     static_assert(
         std::is_unsigned<T>::value,
@@ -495,12 +545,13 @@ class CarbonProtocolWriter {
 
     uint8_t iter = 0;
     // While loop should consume at most (kMaxIters - 1) iterations
-    while (val >= 0x80 && ++iter < kMaxIters) {
-      uint8_t byte = 0x80 | (static_cast<uint8_t>(val) & 0x7f);
-      appender_.write(byte);
+    while (val >= 0x80 && iter < kMaxIters - 1) {
+      buf[iter] = 0x80 | (static_cast<uint8_t>(val) & 0x7f);
       val >>= 7;
+      iter++;
     }
-    appender_.write(static_cast<uint8_t>(val));
+    buf[iter] = static_cast<uint8_t>(val);
+    appender_.push(buf, iter + 1);
   }
 
   template <class T>
@@ -539,9 +590,12 @@ class CarbonProtocolWriter {
     appender_.write(bytes);
   }
 
-  CarbonQueueAppender appender_;
+  CarbonQueueAppender<TS> appender_;
   folly::small_vector<int16_t, detail::kDefaultStackSize> nestedStructFieldIds_;
   int16_t lastFieldId_{0};
 };
 
-} // carbon
+using CarbonProtocolWriter =
+    CarbonProtocolWriterImpl<CarbonQueueAppenderStorage>;
+
+} // namespace carbon

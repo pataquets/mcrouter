@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <sys/uio.h>
 
 #include <cstring>
@@ -18,25 +16,25 @@
 #include <folly/io/IOBuf.h>
 
 #include "mcrouter/lib/carbon/CarbonQueueAppender.h"
-#include "mcrouter/lib/network/UmbrellaProtocol.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
-#include "mcrouter/lib/network/test/gen/CarbonTest.h"
+#include "mcrouter/lib/network/CaretProtocol.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
+#include "mcrouter/lib/network/test/gen/CarbonTestMessages.h"
 
 using namespace facebook::memcache;
 
 TEST(CarbonQueueAppenderTest, longString) {
   carbon::CarbonQueueAppenderStorage storage;
-  McGetReply reply(mc_res_remote_error);
+  McGetReply reply(carbon::Result::REMOTE_ERROR);
 
   // Require more space than CarbonQueueAppenderStorage's internal 512B buffer.
   // This will append() a copy of the string allocated on the heap.
   const std::string message(1024, 'a');
-  reply.message() = message;
+  reply.message_ref() = message;
 
   carbon::CarbonProtocolWriter writer(storage);
   reply.serialize(writer);
 
-  UmbrellaMessageInfo info;
+  CaretMessageInfo info;
   info.bodySize = storage.computeBodySize();
   info.typeId = 123;
   info.reqId = 456;
@@ -55,7 +53,7 @@ TEST(CarbonQueueAppenderTest, longString) {
   }
 
   // Read the serialized data back in and check that it's what we wrote.
-  UmbrellaMessageInfo inputHeader;
+  CaretMessageInfo inputHeader;
   caretParseHeader((uint8_t*)input.data(), input.length(), inputHeader);
   EXPECT_EQ(123, inputHeader.typeId);
   EXPECT_EQ(456, inputHeader.reqId);
@@ -68,8 +66,8 @@ TEST(CarbonQueueAppenderTest, longString) {
   carbon::CarbonProtocolReader reader(folly::io::Cursor(inputBody.get()));
   inputReply.deserialize(reader);
 
-  EXPECT_EQ(mc_res_remote_error, inputReply.result());
-  EXPECT_EQ(message, inputReply.message());
+  EXPECT_EQ(carbon::Result::REMOTE_ERROR, *inputReply.result_ref());
+  EXPECT_EQ(message, *inputReply.message_ref());
 }
 
 namespace {
@@ -78,7 +76,7 @@ void writeToBuf(folly::IOBuf& dest, const char* src, size_t len) {
   std::memcpy(dest.writableTail(), src, len);
   dest.append(len);
 }
-} // anonymous
+} // namespace
 
 TEST(CarbonQueueAppender, manyFields) {
   carbon::CarbonQueueAppenderStorage storage;
@@ -134,7 +132,7 @@ TEST(CarbonQueueAppender, manyFields) {
   // This will trigger CarbonQueueAppenderStorage::coalesce() logic
   manyFields.serialize(writer);
 
-  UmbrellaMessageInfo info;
+  CaretMessageInfo info;
   info.bodySize = storage.computeBodySize();
   info.typeId = 123;
   info.reqId = 456;
@@ -153,7 +151,7 @@ TEST(CarbonQueueAppender, manyFields) {
   }
 
   // Read the serialized data back in and check that it's what we wrote.
-  UmbrellaMessageInfo inputHeader;
+  CaretMessageInfo inputHeader;
   caretParseHeader((uint8_t*)input.data(), input.length(), inputHeader);
   EXPECT_EQ(123, inputHeader.typeId);
   EXPECT_EQ(456, inputHeader.reqId);

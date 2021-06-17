@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <memory>
@@ -16,7 +14,6 @@
 #include <folly/fibers/AddTasks.h>
 
 #include "mcrouter/lib/McResUtil.h"
-#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/mc/msg.h"
@@ -39,10 +36,10 @@ class AllMajorityRoute {
   }
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
-    t(children_, req);
+    return t(children_, req);
   }
 
   explicit AllMajorityRoute(std::vector<std::shared_ptr<RouteHandleIf>> rh)
@@ -61,8 +58,8 @@ class AllMajorityRoute {
       funcs.push_back([reqCopy, rh]() { return rh->route(*reqCopy); });
     }
 
-    size_t counts[mc_nres];
-    std::fill(counts, counts + mc_nres, 0);
+    std::array<size_t, static_cast<size_t>(mc_nres)> counts;
+    counts.fill(0);
     size_t majorityCount = 0;
     Reply majorityReply = createReply(DefaultReply, req);
 
@@ -70,11 +67,11 @@ class AllMajorityRoute {
     taskIt.reserve(children_.size() / 2 + 1);
     while (taskIt.hasNext() && majorityCount < children_.size() / 2 + 1) {
       auto reply = taskIt.awaitNext();
-      auto result = reply.result();
+      auto result = static_cast<size_t>(*reply.result_ref());
 
       ++counts[result];
       if ((counts[result] == majorityCount &&
-           worseThan(reply.result(), majorityReply.result())) ||
+           worseThan(*reply.result_ref(), *majorityReply.result_ref())) ||
           (counts[result] > majorityCount)) {
         majorityReply = std::move(reply);
         majorityCount = counts[result];
@@ -87,5 +84,5 @@ class AllMajorityRoute {
  private:
   const std::vector<std::shared_ptr<RouteHandleIf>> children_;
 };
-}
-} // facebook::memcache
+} // namespace memcache
+} // namespace facebook

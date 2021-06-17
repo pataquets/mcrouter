@@ -1,3 +1,5 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
 # ===========================================================================
 #     http://www.gnu.org/software/autoconf-archive/ax_boost_context.html
 # ===========================================================================
@@ -69,13 +71,19 @@ AC_DEFUN([AX_BOOST_CONTEXT],
       CXXFLAGS_SAVE=$CXXFLAGS
 
       AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
-        [[@%:@include <boost/context/all.hpp>
-#include <boost/version.hpp>
-]],
-        [[#if BOOST_VERSION >= 105600
-   boost::context::fcontext_t fc = boost::context::make_fcontext(0, 0, 0);
+        [[@%:@include <boost/version.hpp>
+#if BOOST_VERSION >= 106100
+#include <boost/context/detail/fcontext.hpp>
 #else
-   boost::context::fcontext_t* fc = boost::context::make_fcontext(0, 0, 0);
+#include <boost/context/fcontext.hpp>
+#endif
+]],
+        [[#if BOOST_VERSION >= 106100
+  boost::context::detail::fcontext_t fc = boost::context::detail::make_fcontext(0, 0, 0);
+#elif BOOST_VERSION >= 105600
+  boost::context::fcontext_t fc = boost::context::make_fcontext(0, 0, 0);
+#else
+  boost::context::fcontext_t* fc = boost::context::make_fcontext(0, 0, 0);
 #endif
 ]]
         )],

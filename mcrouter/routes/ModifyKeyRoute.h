@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <cctype>
@@ -20,7 +18,6 @@
 
 #include "mcrouter/RoutingPrefix.h"
 #include "mcrouter/lib/McKey.h"
-#include "mcrouter/lib/Operation.h"
 #include "mcrouter/lib/Reply.h"
 #include "mcrouter/lib/RouteHandleTraverser.h"
 #include "mcrouter/lib/config/RouteHandleBuilder.h"
@@ -30,7 +27,7 @@
 #include "mcrouter/lib/mc/msg.h"
 #include "mcrouter/lib/mc/protocol.h"
 #include "mcrouter/lib/network/CarbonMessageList.h"
-#include "mcrouter/lib/network/gen/Memcache.h"
+#include "mcrouter/lib/network/gen/MemcacheMessages.h"
 
 namespace facebook {
 namespace memcache {
@@ -40,10 +37,11 @@ namespace mcrouter {
  * Modifies key of current request.
  *  set_routing_prefix if present, routing prefix of a key will be set to this
  *                     value
- *  ensure_key_prefix if key doesn't start with this value, it will be appended
+ *  ensure_key_prefix if key doesn't start with this value, it will be prepended
  *                    to the key
  *  replace_key_prefix Replace this prefix if it exists, and append
  *                     ensure_key_prefix
+ *  set_key_suffix If present, value will be appended to this key.
  *
  * Example:
  *  ModifyKeyRoute
@@ -65,28 +63,30 @@ class ModifyKeyRoute {
       folly::Optional<std::string> routingPrefix,
       std::string keyPrefix,
       bool modifyInplace,
-      folly::Optional<std::string> keyReplace)
+      folly::Optional<std::string> keyReplace,
+      std::string keySuffix)
       : target_(std::move(target)),
         routingPrefix_(std::move(routingPrefix)),
         keyPrefix_(std::move(keyPrefix)),
         modifyInplace_(modifyInplace),
-        keyReplace_(std::move(keyReplace)) {}
+        keyReplace_(std::move(keyReplace)),
+        keySuffix_(std::move(keySuffix)) {}
 
   template <class Request>
-  void traverse(
+  bool traverse(
       const Request& req,
       const RouteHandleTraverser<RouteHandleIf>& t) const {
     auto cloneReq = req;
-    auto key = getModifiedKey(req.key());
+    auto key = getModifiedKey(*req.key_ref());
     if (key) {
-      cloneReq.key() = key.value();
+      cloneReq.key_ref() = key.value();
     }
-    t(*target_, cloneReq);
+    return t(*target_, cloneReq);
   }
 
   template <class Request>
   ReplyT<Request> route(const Request& req) const {
-    const auto key = getModifiedKey(req.key());
+    const auto key = getModifiedKey(*req.key_ref());
     if (key) {
       return routeReqWithKey(req, key.value());
     }
@@ -99,6 +99,7 @@ class ModifyKeyRoute {
   const std::string keyPrefix_;
   const bool modifyInplace_;
   const folly::Optional<std::string> keyReplace_;
+  const std::string keySuffix_;
 
   template <class StringLike>
   folly::Optional<std::string> getModifiedKey(
@@ -110,15 +111,19 @@ class ModifyKeyRoute {
         reqKey.keyWithoutRoute().startsWith(keyReplace_.value())) {
       auto keyWithoutRoute = reqKey.keyWithoutRoute();
       keyWithoutRoute.advance(keyReplace_.value().size());
-      return folly::to<std::string>(rp, keyPrefix_, keyWithoutRoute);
+      return folly::to<std::string>(
+          rp, keyPrefix_, keyWithoutRoute, keySuffix_);
     } else if (!reqKey.keyWithoutRoute().startsWith(keyPrefix_)) {
       auto keyWithoutRoute = reqKey.keyWithoutRoute();
       if (modifyInplace_ && keyWithoutRoute.size() >= keyPrefix_.size()) {
         keyWithoutRoute.advance(keyPrefix_.size());
       }
-      return folly::to<std::string>(rp, keyPrefix_, keyWithoutRoute);
+      return folly::to<std::string>(
+          rp, keyPrefix_, keyWithoutRoute, keySuffix_);
     } else if (routingPrefix_.hasValue() && rp != reqKey.routingPrefix()) {
-      return folly::to<std::string>(rp, reqKey.keyWithoutRoute());
+      return folly::to<std::string>(rp, reqKey.keyWithoutRoute(), keySuffix_);
+    } else if (!keySuffix_.empty()) {
+      return folly::to<std::string>(reqKey.fullKey(), keySuffix_);
     }
     return folly::none;
   }
@@ -136,7 +141,7 @@ class ModifyKeyRoute {
               std::string(mc_req_err_to_string(err)));
     }
     auto cloneReq = req;
-    cloneReq.key() = key;
+    cloneReq.key_ref() = key;
     return target_->route(cloneReq);
   }
 };
@@ -184,6 +189,17 @@ typename RouterInfo::RouteHandlePtr makeModifyKeyRoute(
         mc_req_err_to_string(err));
   }
 
+  std::string keySuffix;
+  if (auto jkeySuffix = json.get_ptr("set_key_suffix")) {
+    keySuffix = jkeySuffix->getString();
+    auto err = isKeyValid<true /* DoSpaceAndCtrlCheck */>(keySuffix);
+    checkLogic(
+        keySuffix.empty() || err == mc_req_err_valid,
+        "ModifyKeyRoute: invalid key suffix '{}', {}",
+        keySuffix,
+        mc_req_err_to_string(err));
+  }
+
   bool modifyInplace = false;
   if (auto joverwrite = json.get_ptr("modify_inplace")) {
     checkLogic(
@@ -198,8 +214,9 @@ typename RouterInfo::RouteHandlePtr makeModifyKeyRoute(
       std::move(routingPrefix),
       std::move(keyPrefix),
       modifyInplace,
-      std::move(keyReplace));
+      std::move(keyReplace),
+      std::move(keySuffix));
 }
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

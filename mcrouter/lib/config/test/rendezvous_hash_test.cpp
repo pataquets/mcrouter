@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include <cmath>
 #include <map>
 #include <random>
@@ -224,16 +222,17 @@ TEST(RendezvousHash, ConsistencyWithDecreasedWeight) {
 
 TEST(ConsistentHashRing, DistributionAccuracy) {
   constexpr size_t kNumRequests = 20000;
-  folly::StringPiece keys[] = {"first_proxy",
-                               "second_proxy",
-                               "third_proxy",
-                               "fourth_proxy",
-                               "a",
-                               "b",
-                               "c",
-                               "d",
-                               "e",
-                               "f"};
+  folly::StringPiece keys[] = {
+      "first_proxy",
+      "second_proxy",
+      "third_proxy",
+      "fourth_proxy",
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f"};
 
   std::vector<double> weights[] = {
       {248.0, 342.0, 2.0, 384.0},

@@ -1,15 +1,14 @@
 /*
- *  Copyright (c) 2016-present, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #pragma once
 
 #include <map>
+#include <sstream>
 
 #include <folly/dynamic.h>
 
@@ -33,7 +32,7 @@ typename RouterInfo::RouteHandlePtr makeOperationSelectorRoute(
       std::move(operationPolicies), std::move(defaultPolicy));
 }
 
-} // detail
+} // namespace detail
 
 template <class RouterInfo>
 typename RouterInfo::RouteHandlePtr makeOperationSelectorRoute(
@@ -80,7 +79,15 @@ typename RouterInfo::RouteHandlePtr makeOperationSelectorRoute(
     for (const auto& it : orderedPolicies) {
       auto id = carbon::getTypeIdByName(
           it.first.data(), typename RouterInfo::RoutableRequests());
-      checkLogic(id != 0, "Unknown operation: {}", it.first);
+      checkLogic(
+          id != 0,
+          "Unknown operation: {}, valid operations: {}",
+          it.first,
+          []() -> std::string {
+            std::stringstream str;
+            insertTypeIds(str, typename RouterInfo::RoutableRequests());
+            return str.str();
+          }());
 
       operationPolicies.set(id, factory.create(*it.second));
     }
@@ -92,6 +99,6 @@ typename RouterInfo::RouteHandlePtr makeOperationSelectorRoute(
   return defaultPolicy;
 }
 
-} // mcrouter
-} // memcache
-} // facebook
+} // namespace mcrouter
+} // namespace memcache
+} // namespace facebook

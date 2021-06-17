@@ -1,10 +1,8 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
+ *  This source code is licensed under the MIT license found in the LICENSE
+ *  file in the root directory of this source tree.
  *
  */
 
@@ -23,7 +21,6 @@
 #include <folly/Optional.h>
 #include <folly/io/IOBuf.h>
 #include <mcrouter/lib/carbon/CarbonProtocolReader.h>
-#include <mcrouter/lib/carbon/CarbonProtocolWriter.h>
 #include <mcrouter/lib/carbon/CommonSerializationTraits.h>
 #include <mcrouter/lib/carbon/Keys.h>
 #include <mcrouter/lib/carbon/ReplyCommon.h>
@@ -44,12 +41,10 @@ enum class SimpleEnum : int64_t {
   Negative = -92233
 };
 
+std::string enumSimpleEnumToString(SimpleEnum val);
+
 class SimpleStruct {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
 
   SimpleStruct() = default;
   SimpleStruct(const SimpleStruct&) = default;
@@ -63,14 +58,22 @@ class SimpleStruct {
   int64_t& member1() {
     return member1_;
   }
-  uint64_t flags() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<const int64_t&>
+   member1_ref() const& {
+    return {this->member1_, __isset.member1};
   }
-  int32_t exptime() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<int64_t&>
+   member1_ref() & {
+    return {this->member1_, __isset.member1};
   }
+  FOLLY_ERASE ::apache::thrift::field_ref<int64_t&&>
+   member1_ref() && {
+      return {std::move(this->member1_), __isset.member1};
+  }
+  
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -80,6 +83,10 @@ class SimpleStruct {
   void visitFields(V&& v) const;
 
  private:
+  struct __isset {
+    bool member1;
+  } __isset = {};
+
   int64_t member1_{0};
 };
 
@@ -91,14 +98,21 @@ class SimpleUnion {
       facebook::memcache::KV<3, std::string>>;
 
  public:
+  enum class ValueType : uint32_t {
+    EMPTY = 0,
+    UMEMBER1 = 1,
+    UMEMBER2 = 2,
+    UMEMBER3 = 3
+  };
+
   SimpleUnion() = default;
   SimpleUnion(const SimpleUnion&) = default;
   SimpleUnion& operator=(const SimpleUnion&) = default;
   SimpleUnion(SimpleUnion&&) = default;
   SimpleUnion& operator=(SimpleUnion&&) = default;
 
-  uint32_t which() const {
-    return _which_;
+  ValueType which() const {
+    return static_cast<ValueType>(_which_);
   }
 
   int64_t& umember1() {
@@ -116,7 +130,6 @@ class SimpleUnion {
     }
     return _carbon_variant.get<int64_t>();
   }
-
   bool& umember2() {
     if (_which_ == 0) {
       return emplace<2>();
@@ -132,7 +145,6 @@ class SimpleUnion {
     }
     return _carbon_variant.get<bool>();
   }
-
   std::string& umember3() {
     if (_which_ == 0) {
       return emplace<3>();
@@ -181,7 +193,17 @@ class SimpleUnion {
     return _carbon_variant.emplace<C>(std::forward<Args>(args)...);
   }
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  template <
+      ValueType id,
+      class... Args,
+      class C = typename carbon::
+          FindByKey<static_cast<uint32_t>(id), _IdTypeMap>::type>
+  C& emplace(Args&&... args) {
+    _which_ = static_cast<uint32_t>(id);
+    return _carbon_variant.emplace<C>(std::forward<Args>(args)...);
+  }
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -195,8 +217,10 @@ class SimpleUnion {
   void foreachMember(V&& v) const;
 
  private:
-  carbon::Variant<int64_t, bool, std::string> _carbon_variant;
-
+  carbon::Variant<
+      int64_t,
+      bool,
+      std::string> _carbon_variant;
   uint32_t _which_{0};
 };
 
@@ -205,10 +229,7 @@ class YetAnotherReply;
 class YetAnotherRequest : public carbon::RequestCommon {
  public:
   using reply_type = YetAnotherReply;
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = true;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 67;
   static constexpr const char* name = "yet_another";
 
@@ -217,7 +238,8 @@ class YetAnotherRequest : public carbon::RequestCommon {
   YetAnotherRequest& operator=(const YetAnotherRequest&) = default;
   YetAnotherRequest(YetAnotherRequest&&) = default;
   YetAnotherRequest& operator=(YetAnotherRequest&&) = default;
-  explicit YetAnotherRequest(folly::StringPiece sp) : key_(sp) {}
+  explicit YetAnotherRequest(folly::StringPiece sp)
+      : key_(sp) {}
   explicit YetAnotherRequest(folly::IOBuf&& carbonKey)
       : key_(std::move(carbonKey)) {}
 
@@ -225,16 +247,24 @@ class YetAnotherRequest : public carbon::RequestCommon {
     return key_;
   }
   carbon::Keys<folly::IOBuf>& key() {
+    markBufferAsDirty();
     return key_;
   }
-  uint64_t flags() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<const carbon::Keys<folly::IOBuf>&>
+   key_ref() const& {
+    return {this->key_, __isset.key};
   }
-  int32_t exptime() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<carbon::Keys<folly::IOBuf>&>
+   key_ref() & {
+    return {this->key_, __isset.key};
   }
-
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  FOLLY_ERASE ::apache::thrift::field_ref<carbon::Keys<folly::IOBuf>&&>
+   key_ref() && {
+      return {std::move(this->key_), __isset.key};
+  }
+  
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -244,15 +274,16 @@ class YetAnotherRequest : public carbon::RequestCommon {
   void visitFields(V&& v) const;
 
  private:
+  struct __isset {
+    bool key;
+  } __isset = {};
+
   carbon::Keys<folly::IOBuf> key_;
 };
 
 class YetAnotherReply : public carbon::ReplyCommon {
  public:
-  static constexpr bool hasExptime = false;
-  static constexpr bool hasFlags = false;
-  static constexpr bool hasKey = false;
-  static constexpr bool hasValue = false;
+
   static constexpr size_t typeId = 68;
 
   YetAnotherReply() = default;
@@ -269,14 +300,22 @@ class YetAnotherReply : public carbon::ReplyCommon {
   carbon::Result& result() {
     return result_;
   }
-  uint64_t flags() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<const carbon::Result&>
+   result_ref() const& {
+    return {this->result_, __isset.result};
   }
-  int32_t exptime() const {
-    return 0;
+  FOLLY_ERASE ::apache::thrift::field_ref<carbon::Result&>
+   result_ref() & {
+    return {this->result_, __isset.result};
   }
+  FOLLY_ERASE ::apache::thrift::field_ref<carbon::Result&&>
+   result_ref() && {
+      return {std::move(this->result_), __isset.result};
+  }
+  
 
-  void serialize(carbon::CarbonProtocolWriter& writer) const;
+  template <class Writer>
+  void serialize(Writer&& writer) const;
 
   void deserialize(carbon::CarbonProtocolReader& reader);
 
@@ -286,9 +325,12 @@ class YetAnotherReply : public carbon::ReplyCommon {
   void visitFields(V&& v) const;
 
  private:
-  carbon::Result result_{mc_res_unknown};
-};
+  struct __isset {
+    bool result;
+  } __isset = {};
 
+  carbon::Result result_{carbon::Result::UNKNOWN};
+};
 } // namespace util
 } // namespace test2
 } // namespace carbon

@@ -1,12 +1,10 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
- *  All rights reserved.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
- *  This source code is licensed under the BSD-style license found in the
- *  LICENSE file in the root directory of this source tree. An additional grant
- *  of patent rights can be found in the PATENTS file in the same directory.
- *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
 #include "McPiper.h"
 
 #include <unordered_set>
@@ -92,11 +90,10 @@ MessagePrinter::Filter getFilter(const Settings& settings) {
   // Protocol
   if (!settings.protocol.empty()) {
     auto protocol = mc_string_to_protocol(settings.protocol.c_str());
-    if (protocol == mc_ascii_protocol || protocol == mc_caret_protocol ||
-        protocol == mc_umbrella_protocol_DONOTUSE) {
+    if (protocol == mc_ascii_protocol || protocol == mc_caret_protocol) {
       filter.protocol.emplace(protocol);
     } else {
-      LOG(ERROR) << "Invalid protocol. ascii|caret|umbrella expected, got "
+      LOG(ERROR) << "Invalid protocol. ascii|caret expected, got "
                  << settings.protocol
                  << ". Protocol filter will not be applied.";
     }
@@ -116,11 +113,11 @@ MessagePrinter::Filter getFilter(const Settings& settings) {
   return filter;
 }
 
-} // anonymous
+} // namespace
 
 void McPiper::stop() {
+  running_ = false;
   eventBase_.runInEventBaseThread([this]() {
-    running_ = false;
     if (fifoReaderManager_) {
       fifoReaderManager_->unregisterCallbacks();
     }
@@ -149,14 +146,14 @@ void McPiper::run(Settings settings, std::ostream& targetOut) {
 
   // Callback from fifoManager. Read the data and feed the correct parser.
   auto fifoReaderCallback = [&parserMap, this](
-      uint64_t connectionId,
-      uint64_t packetId,
-      folly::SocketAddress from,
-      folly::SocketAddress to,
-      uint32_t typeId,
-      uint64_t msgStartTime,
-      std::string routerName,
-      folly::ByteRange data) {
+                                uint64_t connectionId,
+                                uint64_t packetId,
+                                folly::SocketAddress from,
+                                folly::SocketAddress to,
+                                uint32_t typeId,
+                                uint64_t msgStartTime,
+                                std::string routerName,
+                                folly::ByteRange data) {
     if (!running_) {
       return;
     }
@@ -194,6 +191,6 @@ void McPiper::run(Settings settings, std::ostream& targetOut) {
   fifoReaderManager_.reset();
 }
 
-} // mcpiper namespace
-} // memcache namespace
-} // facebook namespace
+} // namespace mcpiper
+} // namespace memcache
+} // namespace facebook
